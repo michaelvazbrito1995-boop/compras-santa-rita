@@ -232,13 +232,6 @@ async function abrirModulo(tela) {
         <input id="pesquisa-produto" type="search"
           placeholder="Digite o nome ou código...">
 
-        <label for="filtro-status">Situação</label>
-        <select id="filtro-status">
-          <option value="todos">Todos os produtos</option>
-          <option value="ativos">Somente ativos</option>
-          <option value="inativos">Somente inativos</option>
-        </select>
-
         <button type="button" id="buscar-produtos">
           PESQUISAR
         </button>
@@ -363,26 +356,15 @@ async function carregarProdutos() {
 
   try {
     const pesquisa = document.getElementById("pesquisa-produto").value.trim();
-    const status = document.getElementById("filtro-status").value;
-
-    const condicoes = [];
-
-    if (status === "ativos") {
-      condicoes.push(where("ativo", "==", true));
-    }
-
-    if (status === "inativos") {
-      condicoes.push(where("ativo", "==", false));
-    }
 
     const referencia = collection(db, "produtos");
-    const filtros = [...condicoes];
-
     let consulta;
 
     // Pesquisa por código de barras exato.
     if (/^\d+$/.test(pesquisa)) {
-      filtros.unshift(where("codigoBarras", "==", pesquisa));
+      const filtros = [
+        where("codigoBarras", "==", pesquisa)
+      ];
 
       if (cursoresPaginas[paginaAtual]) {
         filtros.push(startAfter(cursoresPaginas[paginaAtual]));
@@ -394,7 +376,9 @@ async function carregarProdutos() {
 
     } else {
       // Pesquisa pelo início do nome.
-      filtros.push(orderBy("nome"));
+      const filtros = [
+        orderBy("nome")
+      ];
 
       if (pesquisa) {
         filtros.push(startAt(pesquisa));
@@ -474,6 +458,11 @@ function renderizarProdutos() {
 
         <div class="produto-cabecalho">
           <strong>${escaparHTML(produto.nome)}</strong>
+
+          <span class="produto-situacao"
+            style="color:${ativo ? "#267326" : "#c62828"}">
+            ${ativo ? "Ativo" : "Inativo"}
+          </span>
         </div>
 
         <p class="produto-codigo">
