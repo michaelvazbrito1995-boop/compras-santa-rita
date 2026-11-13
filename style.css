@@ -1,0 +1,117 @@
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  color: #333;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topo {
+  background: #f5c928;
+  color: #292929;
+  text-align: center;
+  padding: 35px 15px;
+  border-bottom: 5px solid #dfb414;
+}
+
+.logo {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+
+.topo h1 {
+  font-size: 27px;
+  font-weight: bold;
+}
+
+.topo p {
+  margin-top: 8px;
+  font-size: 15px;
+}
+
+.container {
+  width: 100%;
+  max-width: 440px;
+  margin: 35px auto;
+  padding: 0 18px;
+  flex: 1;
+}
+
+.login-card {
+  background: #fff;
+  padding: 28px 22px;
+  border-radius: 14px;
+  box-shadow: 0 3px 15px rgba(0, 0, 0, 0.08);
+}
+
+.login-card h2 {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+
+.login-card p {
+  color: #666;
+  line-height: 1.5;
+  margin-bottom: 22px;
+}
+
+label {
+  display: block;
+  font-weight: bold;
+  margin: 15px 0 7px;
+}
+
+input {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 16px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #e3b500;
+}
+
+button {
+  width: 100%;
+  padding: 15px;
+  margin-top: 22px;
+  background: #f5c928;
+  color: #292929;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:active {
+  background: #dfb414;
+}
+
+#mensagem {
+  margin-top: 15px;
+  font-size: 14px;
+}
+
+footer {
+  text-align: center;
+  padding: 20px 10px;
+  color: #666;
+  font-size: 13px;
+}
+
+footer span {
+  display: block;
+  margin-top: 5px;
+}
