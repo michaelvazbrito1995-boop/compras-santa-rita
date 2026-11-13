@@ -42,7 +42,7 @@ const db = getFirestore(app);
 const formulario = document.getElementById("login-form");
 const container = document.querySelector(".container");
 
-const LIMITE_PRODUTOS = 30;
+const LIMITE_PRODUTOS = 5;
 
 let produtosCarregados = [];
 let produtoEditandoId = null;
@@ -232,10 +232,6 @@ async function abrirModulo(tela) {
         <input id="pesquisa-produto" type="search"
           placeholder="Digite o nome ou código...">
 
-        <label for="filtro-departamento">Departamento</label>
-        <input id="filtro-departamento" type="text"
-          placeholder="Digite o departamento exato">
-
         <label for="filtro-status">Situação</label>
         <select id="filtro-status">
           <option value="todos">Todos os produtos</option>
@@ -252,7 +248,7 @@ async function abrirModulo(tela) {
         <div id="lista-produtos"></div>
 
         <div id="paginacao-produtos"
-          style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px">
+          style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:15px">
 
           <button type="button" id="pagina-anterior">
             ANTERIOR
@@ -289,11 +285,6 @@ async function abrirModulo(tela) {
       .addEventListener("click", pesquisarProdutos);
 
     document.getElementById("pesquisa-produto")
-      .addEventListener("keydown", evento => {
-        if (evento.key === "Enter") pesquisarProdutos();
-      });
-
-    document.getElementById("filtro-departamento")
       .addEventListener("keydown", evento => {
         if (evento.key === "Enter") pesquisarProdutos();
       });
@@ -372,14 +363,9 @@ async function carregarProdutos() {
 
   try {
     const pesquisa = document.getElementById("pesquisa-produto").value.trim();
-    const departamento = document.getElementById("filtro-departamento").value.trim();
     const status = document.getElementById("filtro-status").value;
 
     const condicoes = [];
-
-    if (departamento) {
-      condicoes.push(where("departamento", "==", departamento));
-    }
 
     if (status === "ativos") {
       condicoes.push(where("ativo", "==", true));
@@ -390,55 +376,55 @@ async function carregarProdutos() {
     }
 
     const referencia = collection(db, "produtos");
+    const filtros = [...condicoes];
+
     let consulta;
 
-    // Pesquisa numérica: código de barras exato.
+    // Pesquisa por código de barras exato.
     if (/^\d+$/.test(pesquisa)) {
-      consulta = query(
-        referencia,
-        where("codigoBarras", "==", pesquisa),
-        ...condicoes,
-        limit(LIMITE_PRODUTOS)
-      );
+      filtros.unshift(where("codigoBarras", "==", pesquisa));
+
+      if (cursoresPaginas[paginaAtual]) {
+        filtros.push(startAfter(cursoresPaginas[paginaAtual]));
+      }
+
+      filtros.push(limit(LIMITE_PRODUTOS + 1));
+
+      consulta = query(referencia, ...filtros);
 
     } else {
-      // Pesquisa por início do nome.
-      const filtros = [
-        ...condicoes,
-        orderBy("nome")
-      ];
+      // Pesquisa pelo início do nome.
+      filtros.push(orderBy("nome"));
 
       if (pesquisa) {
         filtros.push(startAt(pesquisa));
         filtros.push(endAt(pesquisa + "\uf8ff"));
       }
 
-      filtros.push(limit(LIMITE_PRODUTOS));
-
       if (cursoresPaginas[paginaAtual]) {
-        filtros.splice(
-          filtros.length - 1,
-          0,
-          startAfter(cursoresPaginas[paginaAtual])
-        );
+        filtros.push(startAfter(cursoresPaginas[paginaAtual]));
       }
+
+      filtros.push(limit(LIMITE_PRODUTOS + 1));
 
       consulta = query(referencia, ...filtros);
     }
 
     const resultado = await getDocs(consulta);
 
-    produtosCarregados = resultado.docs.map(documento => ({
+    temProximaPagina = resultado.docs.length > LIMITE_PRODUTOS;
+
+    const documentosVisiveis = resultado.docs.slice(0, LIMITE_PRODUTOS);
+
+    produtosCarregados = documentosVisiveis.map(documento => ({
       id: documento.id,
       ...documento.data()
     }));
 
-    temProximaPagina = resultado.docs.length === LIMITE_PRODUTOS;
-
-    // Guarda o último documento para avançar na paginação.
+    // Usa o último produto exibido como referência da próxima página.
     window.ultimoProdutoConsultado =
-      resultado.docs.length > 0
-        ? resultado.docs[resultado.docs.length - 1]
+      documentosVisiveis.length > 0
+        ? documentosVisiveis[documentosVisiveis.length - 1]
         : null;
 
     renderizarProdutos();
@@ -451,7 +437,7 @@ async function carregarProdutos() {
     if (mensagem) {
       mensagem.textContent =
         erro.code === "failed-precondition"
-          ? "O Firebase precisa preparar um índice para este filtro. Verifique a mensagem no console."
+          ? "O Firebase precisa preparar um índice para esta consulta. Verifique a mensagem no console."
           : "Verifique sua conexão e tente novamente.";
 
       mensagem.style.color = "#c62828";
@@ -487,27 +473,21 @@ function renderizarProdutos() {
     return `
       <div class="aviso-modulo produto-linha">
 
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div class="produto-cabecalho">
           <strong>${escaparHTML(produto.nome)}</strong>
 
-          <span style="
-            font-size:12px;
-            font-weight:bold;
-            color:${ativo ? "#267326" : "#c62828"}">
+          <span class="produto-situacao"
+            style="color:${ativo ? "#267326" : "#c62828"}">
             ${ativo ? "ATIVO" : "INATIVO"}
           </span>
         </div>
 
-        <p>
-          ${escaparHTML(produto.departamento || "")}
-          · ${escaparHTML(produto.categoria || "")}
-          · ${escaparHTML(produto.unidade || "")}
+        <p class="produto-codigo">
+          Código de barras: ${escaparHTML(produto.codigoBarras || "Não informado")}
         </p>
 
         <details>
-          <summary>Ver detalhes e ações</summary>
-
-          <p>Código: ${escaparHTML(produto.codigoBarras || "Não informado")}</p>
+          <summary>Opções</summary>
 
           <button type="button" data-editar="${escaparHTML(produto.id)}">
             EDITAR
@@ -604,7 +584,6 @@ async function salvarProduto(evento) {
   evento.preventDefault();
 
   const botao = document.getElementById("botao-salvar-produto");
-
   const idEmEdicao = produtoEditandoId;
 
   const dados = {
@@ -637,18 +616,11 @@ async function salvarProduto(evento) {
 
     limparFormularioProduto();
 
-    mostrarMensagemProduto(
-      idEmEdicao
-        ? "Produto atualizado com sucesso!"
-        : "Produto cadastrado com sucesso!"
-    );
-
     paginaAtual = 0;
     cursoresPaginas = [null];
 
     await carregarProdutos();
 
-    // Mantém o aviso de sucesso visível.
     mostrarMensagemProduto(
       idEmEdicao
         ? "Produto atualizado com sucesso!"
