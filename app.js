@@ -4,6 +4,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/13.3.0/firebas
 import {
   getAuth,
   signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   onAuthStateChanged,
   signOut
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-auth.js";
@@ -15,7 +16,10 @@ import {
   collection,
   getDocs,
   addDoc,
+  setDoc,
   updateDoc,
+  query,
+  where,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
@@ -34,9 +38,8 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ELEMENTOS E VARIÁVEIS
+// VARIÁVEIS
 
-const formulario = document.getElementById("login-form");
 const container = document.querySelector(".container");
 
 const LIMITE_PRODUTOS = 5;
@@ -50,6 +53,7 @@ let paginaAtual = 0;
 let temProximaPagina = false;
 
 let controleSessao = 0;
+let cadastroEmAndamento = false;
 
 // FUNÇÕES GERAIS
 
@@ -80,9 +84,18 @@ function mostrarMensagem(texto, erro = false) {
   mensagem.style.color = erro ? "#c62828" : "#267326";
 }
 
-// VERIFICAR ADMINISTRADOR
+function mensagemNaTela(id, texto, erro = false) {
+  const elemento = document.getElementById(id);
 
-async function verificarAdministrador(usuario) {
+  if (!elemento) return;
+
+  elemento.textContent = texto;
+  elemento.style.color = erro ? "#c62828" : "#267326";
+}
+
+// VERIFICAR USUÁRIO
+
+async function buscarUsuario(usuario) {
   const referencia = doc(db, "usuarios", usuario.uid);
   const resultado = await getDoc(referencia);
 
@@ -92,26 +105,311 @@ async function verificarAdministrador(usuario) {
 
   const dados = resultado.data();
 
-  if (dados.perfil !== "admin" || dados.ativo !== true) {
-    throw new Error("Este usuário não tem acesso de administrador.");
+  if (dados.ativo !== true) {
+    throw new Error("Este usuário está bloqueado.");
+  }
+
+  if (dados.perfil !== "admin" && dados.perfil !== "fornecedor") {
+    throw new Error("Perfil de usuário inválido.");
   }
 
   return dados;
 }
 
-// TELA DO PAINEL
+// SAIR
+
+async function sairDoSistema() {
+  try {
+    await signOut(auth);
+  } catch (erro) {
+    console.error("Erro ao sair:", erro);
+    alert("Não foi possível sair. Tente novamente.");
+  }
+}
+
+// TELA DE LOGIN E CADASTRO
+
+function mostrarTelaLogin() {
+  container.innerHTML = `
+    <section class="login-card">
+
+      <div id="area-login">
+
+        <h2>Bem-vindo!</h2>
+
+        <p>Entre com seu e-mail e senha para acessar o sistema.</p>
+
+        <form id="login-form">
+
+          <label for="email">E-mail</label>
+
+          <input
+            type="email"
+            id="email"
+            placeholder="Digite seu e-mail"
+            required
+          >
+
+          <label for="senha">Senha</label>
+
+          <input
+            type="password"
+            id="senha"
+            placeholder="Digite sua senha"
+            required
+          >
+
+          <button type="submit" id="botao-login">
+            ENTRAR
+          </button>
+
+          <p id="mensagem"></p>
+
+        </form>
+
+        <hr style="margin:25px 0">
+
+        <p>Ainda não tem cadastro?</p>
+
+        <button type="button" id="mostrar-cadastro">
+          CADASTRAR COMO VENDEDOR
+        </button>
+
+      </div>
+
+      <div id="area-cadastro" style="display:none">
+
+        <h2>Cadastro de vendedor</h2>
+
+        <p>Crie sua conta para participar das cotações.</p>
+
+        <form id="cadastro-form">
+
+          <label for="cadastro-nome">Nome completo</label>
+
+          <input
+            id="cadastro-nome"
+            type="text"
+            placeholder="Seu nome"
+            required
+          >
+
+          <label for="cadastro-telefone">Telefone / WhatsApp</label>
+
+          <input
+            id="cadastro-telefone"
+            type="tel"
+            placeholder="Seu telefone"
+            required
+          >
+
+          <label for="cadastro-email">E-mail</label>
+
+          <input
+            id="cadastro-email"
+            type="email"
+            placeholder="Seu e-mail"
+            required
+          >
+
+          <label for="cadastro-senha">Senha</label>
+
+          <input
+            id="cadastro-senha"
+            type="password"
+            placeholder="Crie uma senha"
+            minlength="6"
+            required
+          >
+
+          <button type="submit" id="botao-cadastro">
+            CRIAR CONTA
+          </button>
+
+          <p id="mensagem-cadastro"></p>
+
+        </form>
+
+        <button type="button" id="voltar-login">
+          VOLTAR AO LOGIN
+        </button>
+
+      </div>
+
+    </section>
+  `;
+
+  document.getElementById("mostrar-cadastro")
+    .addEventListener("click", () => {
+      document.getElementById("area-login").style.display = "none";
+      document.getElementById("area-cadastro").style.display = "block";
+    });
+
+  document.getElementById("voltar-login")
+    .addEventListener("click", () => {
+      document.getElementById("area-cadastro").style.display = "none";
+      document.getElementById("area-login").style.display = "block";
+    });
+
+  // LOGIN
+
+  document.getElementById("login-form")
+    .addEventListener("submit", async evento => {
+      evento.preventDefault();
+
+      const email = document.getElementById("email").value.trim();
+      const senha = document.getElementById("senha").value;
+      const botao = document.getElementById("botao-login");
+
+      mostrarMensagem("Verificando acesso...");
+
+      botao.disabled = true;
+      botao.textContent = "AGUARDE...";
+
+      try {
+        await signInWithEmailAndPassword(auth, email, senha);
+
+      } catch (erro) {
+        console.error("Erro no login:", erro);
+
+        let texto = "Não foi possível entrar no sistema.";
+
+        if (
+          erro.code === "auth/invalid-credential" ||
+          erro.code === "auth/user-not-found" ||
+          erro.code === "auth/wrong-password"
+        ) {
+          texto = "E-mail ou senha incorretos.";
+
+        } else if (erro.code === "auth/network-request-failed") {
+          texto = "Erro de conexão. Verifique sua internet.";
+        }
+
+        mostrarMensagem(texto, true);
+
+        botao.disabled = false;
+        botao.textContent = "ENTRAR";
+      }
+    });
+
+  // CADASTRO DO VENDEDOR
+
+  document.getElementById("cadastro-form")
+    .addEventListener("submit", async evento => {
+      evento.preventDefault();
+
+      const nome = document.getElementById("cadastro-nome").value.trim();
+      const telefone = document.getElementById("cadastro-telefone").value.trim();
+      const email = document.getElementById("cadastro-email").value.trim();
+      const senha = document.getElementById("cadastro-senha").value;
+
+      const botao = document.getElementById("botao-cadastro");
+
+      if (!nome || !telefone || !email || !senha) {
+        mensagemNaTela(
+          "mensagem-cadastro",
+          "Preencha todos os campos.",
+          true
+        );
+        return;
+      }
+
+      botao.disabled = true;
+      botao.textContent = "CRIANDO CONTA...";
+
+      mensagemNaTela(
+        "mensagem-cadastro",
+        "Criando seu cadastro..."
+      );
+
+      cadastroEmAndamento = true;
+
+      let contaCriada = false;
+
+      try {
+        const resultado = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          senha
+        );
+
+        contaCriada = true;
+
+        const usuario = resultado.user;
+
+        await setDoc(doc(db, "usuarios", usuario.uid), {
+          nome,
+          telefone,
+          email,
+          perfil: "fornecedor",
+          ativo: true,
+          criadoEm: serverTimestamp()
+        });
+
+        cadastroEmAndamento = false;
+
+        const dados = {
+          nome,
+          telefone,
+          email,
+          perfil: "fornecedor",
+          ativo: true
+        };
+
+        mostrarPainelFornecedor(dados, usuario.uid);
+
+      } catch (erro) {
+        console.error("Erro no cadastro:", erro);
+
+        cadastroEmAndamento = false;
+
+        if (contaCriada) {
+          await signOut(auth);
+        }
+
+        let texto = "Não foi possível criar sua conta.";
+
+        if (erro.code === "auth/email-already-in-use") {
+          texto = "Este e-mail já está cadastrado.";
+
+        } else if (erro.code === "auth/invalid-email") {
+          texto = "Digite um e-mail válido.";
+
+        } else if (erro.code === "auth/weak-password") {
+          texto = "A senha precisa ter pelo menos 6 caracteres.";
+
+        } else if (erro.code === "permission-denied") {
+          texto = "O Firebase ainda não autorizou o cadastro. As regras precisam ser configuradas.";
+
+        } else if (contaCriada) {
+          texto = "A conta foi criada, mas não foi possível salvar o cadastro. Entre em contato com o administrador.";
+        }
+
+        mensagemNaTela("mensagem-cadastro", texto, true);
+
+        botao.disabled = false;
+        botao.textContent = "CRIAR CONTA";
+      }
+    });
+}
+
+// PAINEL ADMINISTRATIVO
 
 function mostrarPainel(dados) {
   container.innerHTML = `
     <section class="painel">
 
       <div class="painel-topo">
+
         <div>
           <h2>Olá, ${escaparHTML(dados.nome || "Administrador")}!</h2>
           <p>Bem-vindo ao sistema de compras.</p>
         </div>
 
-        <button id="sair" class="botao-sair">SAIR</button>
+        <button id="sair" class="botao-sair">
+          SAIR
+        </button>
+
       </div>
 
       <div class="painel-titulo">
@@ -158,113 +456,263 @@ function mostrarPainel(dados) {
     </section>
   `;
 
-  document.querySelectorAll(".menu-card").forEach(botao => {
-    botao.addEventListener("click", () => {
-      abrirModulo(botao.dataset.tela);
+  document.getElementById("sair")
+    .addEventListener("click", sairDoSistema);
+
+  document.querySelectorAll(".menu-card")
+    .forEach(botao => {
+      botao.addEventListener("click", () => {
+        abrirModulo(botao.dataset.tela);
+      });
     });
-  });
-
-  // SAIR DO SISTEMA
-
-  document.getElementById("sair").addEventListener("click", async () => {
-    const botao = document.getElementById("sair");
-
-    botao.disabled = true;
-    botao.textContent = "SAINDO...";
-
-    try {
-      await signOut(auth);
-
-      // O acompanhamento da sessão mostrará o login.
-
-    } catch (erro) {
-      console.error("Erro ao sair:", erro);
-
-      alert("Não foi possível sair. Tente novamente.");
-
-      botao.disabled = false;
-      botao.textContent = "SAIR";
-    }
-  });
 }
 
-// TELA DE LOGIN
+// PAINEL DO VENDEDOR
 
-function mostrarTelaLogin() {
+function mostrarPainelFornecedor(dados, uid) {
   container.innerHTML = `
-    <section class="login-card">
+    <section class="painel">
 
-      <h2>Bem-vindo!</h2>
+      <div class="painel-topo">
 
-      <p>Entre com seu e-mail e senha para acessar o sistema.</p>
+        <div>
+          <h2>Olá, ${escaparHTML(dados.nome || "Vendedor")}!</h2>
+          <p>Área do fornecedor.</p>
+        </div>
 
-      <form id="login-form">
+        <button id="sair" class="botao-sair">
+          SAIR
+        </button>
 
-        <label for="email">E-mail</label>
+      </div>
 
-        <input
-          type="email"
-          id="email"
-          placeholder="Digite seu e-mail"
-          required
-        >
+      <div class="painel-titulo">
+        <h2>Área do vendedor</h2>
+        <p>Gerencie suas empresas e participe das cotações.</p>
+      </div>
 
-        <label for="senha">Senha</label>
+      <div class="modulo-aberto">
 
-        <input
-          type="password"
-          id="senha"
-          placeholder="Digite sua senha"
-          required
-        >
+        <h3>🏢 Minhas empresas</h3>
 
-        <button type="submit">ENTRAR</button>
+        <p>Cadastre as empresas que você representa.</p>
 
-        <p id="mensagem"></p>
+        <button id="abrir-cadastro-empresa">
+          + CADASTRAR EMPRESA
+        </button>
 
-      </form>
+        <div id="area-cadastro-empresa" style="display:none">
+
+          <form id="form-empresa">
+
+            <label for="nome-empresa">Nome da empresa</label>
+
+            <input
+              id="nome-empresa"
+              type="text"
+              placeholder="Digite o nome da empresa"
+              required
+            >
+
+            <button type="submit" id="botao-salvar-empresa">
+              SALVAR EMPRESA
+            </button>
+
+            <button type="button" id="cancelar-empresa">
+              CANCELAR
+            </button>
+
+          </form>
+
+          <p id="mensagem-empresa"></p>
+
+        </div>
+
+        <hr style="margin:25px 0">
+
+        <h3>Empresas cadastradas</h3>
+
+        <div id="lista-empresas">
+          Carregando empresas...
+        </div>
+
+      </div>
 
     </section>
   `;
 
-  const novoFormulario = document.getElementById("login-form");
+  document.getElementById("sair")
+    .addEventListener("click", sairDoSistema);
 
-  novoFormulario.addEventListener("submit", async evento => {
-    evento.preventDefault();
+  document.getElementById("abrir-cadastro-empresa")
+    .addEventListener("click", () => {
+      document.getElementById("area-cadastro-empresa")
+        .style.display = "block";
+    });
 
-    const email = document.getElementById("email").value.trim();
-    const senha = document.getElementById("senha").value;
+  document.getElementById("cancelar-empresa")
+    .addEventListener("click", () => {
+      document.getElementById("form-empresa").reset();
 
-    const botao = novoFormulario.querySelector("button");
+      document.getElementById("area-cadastro-empresa")
+        .style.display = "none";
 
-    mostrarMensagem("Verificando acesso...");
+      mensagemNaTela("mensagem-empresa", "");
+    });
 
-    botao.disabled = true;
-    botao.textContent = "AGUARDE...";
+  document.getElementById("form-empresa")
+    .addEventListener("submit", evento => {
+      cadastrarEmpresa(evento, uid);
+    });
 
-    try {
-      await signInWithEmailAndPassword(auth, email, senha);
-
-    } catch (erro) {
-      console.error("Erro no login:", erro);
-
-      let texto = "Não foi possível entrar no sistema.";
-
-      if (erro.code === "auth/invalid-credential") {
-        texto = "E-mail ou senha incorretos.";
-      } else if (erro.code === "auth/network-request-failed") {
-        texto = "Erro de conexão. Verifique sua internet.";
-      }
-
-      mostrarMensagem(texto, true);
-
-      botao.disabled = false;
-      botao.textContent = "ENTRAR";
-    }
-  });
+  carregarEmpresas(uid);
 }
 
-// ABRIR MÓDULOS
+// CADASTRAR EMPRESA
+
+async function cadastrarEmpresa(evento, uid) {
+  evento.preventDefault();
+
+  const nome = document.getElementById("nome-empresa").value.trim();
+
+  const botao = document.getElementById("botao-salvar-empresa");
+
+  if (!nome) {
+    mensagemNaTela(
+      "mensagem-empresa",
+      "Digite o nome da empresa.",
+      true
+    );
+    return;
+  }
+
+  botao.disabled = true;
+  botao.textContent = "SALVANDO...";
+
+  try {
+    // Criar empresa vinculada ao vendedor.
+
+    const empresa = await addDoc(collection(db, "fornecedores"), {
+      empresa: nome,
+      responsavelUid: uid,
+      ativo: true,
+      criadoEm: serverTimestamp()
+    });
+
+    // Buscar todas as cotações que estão abertas.
+
+    const consultaCotacoes = query(
+      collection(db, "cotacoes"),
+      where("status", "==", "aberta")
+    );
+
+    const resultadoCotacoes = await getDocs(consultaCotacoes);
+
+    // Criar um vínculo para cada cotação aberta.
+
+    for (const cotacao of resultadoCotacoes.docs) {
+      const vinculoId = cotacao.id + "__" + empresa.id;
+
+      const referenciaVinculo = doc(
+        db,
+        "cotacao_fornecedores",
+        vinculoId
+      );
+
+      const vinculoExistente = await getDoc(referenciaVinculo);
+
+      if (!vinculoExistente.exists()) {
+        await setDoc(referenciaVinculo, {
+          cotacaoId: cotacao.id,
+          fornecedorId: empresa.id,
+          responsavelUid: uid,
+          status: "convidado",
+          criadoEm: serverTimestamp()
+        });
+      }
+    }
+
+    document.getElementById("form-empresa").reset();
+
+    document.getElementById("area-cadastro-empresa")
+      .style.display = "none";
+
+    mensagemNaTela(
+      "mensagem-empresa",
+      "Empresa cadastrada com sucesso!"
+    );
+
+    await carregarEmpresas(uid);
+
+  } catch (erro) {
+    console.error("Erro ao cadastrar empresa:", erro);
+
+    mensagemNaTela(
+      "mensagem-empresa",
+      "Não foi possível cadastrar a empresa. Verifique as regras do Firebase.",
+      true
+    );
+
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "SALVAR EMPRESA";
+  }
+}
+
+// CARREGAR EMPRESAS DO VENDEDOR
+
+async function carregarEmpresas(uid) {
+  const lista = document.getElementById("lista-empresas");
+
+  if (!lista) return;
+
+  lista.textContent = "Carregando empresas...";
+
+  try {
+    const consulta = query(
+      collection(db, "fornecedores"),
+      where("responsavelUid", "==", uid)
+    );
+
+    const resultado = await getDocs(consulta);
+
+    if (resultado.empty) {
+      lista.innerHTML = `
+        <div class="aviso-modulo">
+          Você ainda não cadastrou nenhuma empresa.
+        </div>
+      `;
+      return;
+    }
+
+    lista.innerHTML = resultado.docs.map(documento => {
+      const empresa = documento.data();
+
+      return `
+        <div class="aviso-modulo">
+
+          <strong>${escaparHTML(empresa.empresa)}</strong>
+
+          <p>
+            Situação:
+            <span style="color:${empresa.ativo ? "#267326" : "#c62828"}">
+              ${empresa.ativo ? "Ativa" : "Bloqueada"}
+            </span>
+          </p>
+
+        </div>
+      `;
+    }).join("");
+
+  } catch (erro) {
+    console.error("Erro ao carregar empresas:", erro);
+
+    lista.textContent =
+      "Não foi possível carregar suas empresas.";
+  }
+}
+
+// ABRIR MÓDULOS ADMINISTRATIVOS
 
 async function abrirModulo(tela) {
   const conteudo = document.getElementById("conteudo-modulo");
@@ -426,8 +874,6 @@ async function abrirModulo(tela) {
     document.getElementById("buscar-produtos")
       .addEventListener("click", pesquisarProdutos);
 
-    // Pesquisa também ao apertar ENTER.
-
     document.getElementById("pesquisa-produto")
       .addEventListener("keydown", evento => {
         if (evento.key === "Enter") {
@@ -435,8 +881,6 @@ async function abrirModulo(tela) {
           pesquisarProdutos();
         }
       });
-
-    // Pesquisa automaticamente enquanto digita.
 
     document.getElementById("pesquisa-produto")
       .addEventListener("input", pesquisarProdutos);
@@ -475,7 +919,7 @@ async function abrirModulo(tela) {
 
     usuarios: {
       titulo: "Usuários",
-      descricao: "Aprovação e gerenciamento dos acessos."
+      descricao: "Gerenciamento dos acessos."
     }
   };
 
@@ -519,7 +963,7 @@ function mostrarMensagemProduto(texto, erro = false) {
   elemento.style.margin = "12px 0";
 }
 
-// CARREGAR PRODUTOS DO FIREBASE
+// CARREGAR PRODUTOS
 
 async function carregarProdutos() {
   const lista = document.getElementById("lista-produtos");
@@ -532,15 +976,12 @@ async function carregarProdutos() {
   if (mensagem) mensagem.textContent = "";
 
   try {
-    const referencia = collection(db, "produtos");
-    const resultado = await getDocs(referencia);
+    const resultado = await getDocs(collection(db, "produtos"));
 
     todosProdutos = resultado.docs.map(documento => ({
       id: documento.id,
       ...documento.data()
     }));
-
-    // Ordenar produtos pelo nome.
 
     todosProdutos.sort((a, b) =>
       String(a.nome || "").localeCompare(
@@ -548,8 +989,6 @@ async function carregarProdutos() {
         "pt-BR"
       )
     );
-
-    // Aplicar pesquisa atual.
 
     filtrarProdutos();
 
@@ -577,12 +1016,8 @@ function filtrarProdutos() {
   const pesquisa = normalizarTexto(campoPesquisa.value);
 
   produtosEncontrados = todosProdutos.filter(produto => {
-
     const nome = normalizarTexto(produto.nome);
-
     const codigo = normalizarTexto(produto.codigoBarras);
-
-    // Procura qualquer trecho do nome ou do código.
 
     return nome.includes(pesquisa) || codigo.includes(pesquisa);
   });
@@ -592,27 +1027,21 @@ function filtrarProdutos() {
   renderizarProdutos();
 }
 
-// BOTÃO PESQUISAR
-
 function pesquisarProdutos() {
   filtrarProdutos();
 }
 
-// RENDERIZAR LISTA E PAGINAÇÃO
+// RENDERIZAR PRODUTOS
 
 function renderizarProdutos() {
   const lista = document.getElementById("lista-produtos");
-
   const numeroPagina = document.getElementById("numero-pagina");
-
   const anterior = document.getElementById("pagina-anterior");
-
   const proxima = document.getElementById("pagina-proxima");
 
   if (!lista || !numeroPagina || !anterior || !proxima) return;
 
   const inicio = paginaAtual * LIMITE_PRODUTOS;
-
   const fim = inicio + LIMITE_PRODUTOS;
 
   produtosCarregados = produtosEncontrados.slice(inicio, fim);
@@ -628,7 +1057,6 @@ function renderizarProdutos() {
     `Página ${paginaAtual + 1} de ${totalPaginas}`;
 
   anterior.disabled = paginaAtual === 0;
-
   proxima.disabled = !temProximaPagina;
 
   if (produtosCarregados.length === 0) {
@@ -637,12 +1065,10 @@ function renderizarProdutos() {
         Nenhum produto encontrado.
       </div>
     `;
-
     return;
   }
 
   lista.innerHTML = produtosCarregados.map(produto => {
-
     const ativo = produto.ativo === true;
 
     return `
@@ -690,15 +1116,11 @@ function renderizarProdutos() {
     `;
   }).join("");
 
-  // BOTÃO EDITAR
-
   lista.querySelectorAll("[data-editar]").forEach(botao => {
     botao.addEventListener("click", () => {
       editarProduto(botao.dataset.editar);
     });
   });
-
-  // BOTÃO ATIVAR OU DESATIVAR
 
   lista.querySelectorAll("[data-alterar-status]").forEach(botao => {
     botao.addEventListener("click", () => {
@@ -767,7 +1189,7 @@ function editarProduto(id) {
   });
 }
 
-// LIMPAR FORMULÁRIO
+// LIMPAR FORMULÁRIO DE PRODUTO
 
 function limparFormularioProduto() {
   produtoEditandoId = null;
@@ -788,7 +1210,7 @@ function limparFormularioProduto() {
   mostrarMensagemProduto("");
 }
 
-// SALVAR OU ATUALIZAR PRODUTO
+// SALVAR PRODUTO
 
 async function salvarProduto(evento) {
   evento.preventDefault();
@@ -821,7 +1243,6 @@ async function salvarProduto(evento) {
       "Preencha todos os campos obrigatórios.",
       true
     );
-
     return;
   }
 
@@ -830,23 +1251,18 @@ async function salvarProduto(evento) {
 
   try {
     if (idEmEdicao) {
-
       await updateDoc(doc(db, "produtos", idEmEdicao), dados);
 
     } else {
-
       await addDoc(collection(db, "produtos"), {
         ...dados,
         criadoEm: serverTimestamp()
       });
-
     }
 
     limparFormularioProduto();
 
     paginaAtual = 0;
-
-    // Atualizar lista após salvar.
 
     await carregarProdutos();
 
@@ -908,72 +1324,35 @@ async function alterarStatusProduto(id) {
   }
 }
 
-// LOGIN DA TELA INICIAL
-
-if (formulario) {
-  formulario.addEventListener("submit", async evento => {
-    evento.preventDefault();
-
-    const email = document.getElementById("email").value.trim();
-
-    const senha = document.getElementById("senha").value;
-
-    const botao = formulario.querySelector("button");
-
-    mostrarMensagem("Verificando acesso...");
-
-    botao.disabled = true;
-    botao.textContent = "AGUARDE...";
-
-    try {
-      await signInWithEmailAndPassword(auth, email, senha);
-
-    } catch (erro) {
-      console.error("Erro no login:", erro);
-
-      let texto = "Não foi possível entrar no sistema.";
-
-      if (erro.code === "auth/invalid-credential") {
-        texto = "E-mail ou senha incorretos.";
-
-      } else if (erro.code === "auth/network-request-failed") {
-        texto = "Erro de conexão. Verifique sua internet.";
-      }
-
-      mostrarMensagem(texto, true);
-
-      botao.disabled = false;
-      botao.textContent = "ENTRAR";
-    }
-  });
-}
-
-// ACOMPANHAR SESSÃO DO FIREBASE
+// ACOMPANHAR SESSÃO
 
 onAuthStateChanged(auth, async usuario => {
-
-  // Identifica cada mudança de sessão.
-
   const tentativa = ++controleSessao;
 
   if (!usuario) {
+    if (cadastroEmAndamento) return;
+
     mostrarTelaLogin();
     return;
   }
 
-  try {
-    const dados = await verificarAdministrador(usuario);
+  if (cadastroEmAndamento) return;
 
-    // Impede que uma verificação antiga reabra o painel.
+  try {
+    const dados = await buscarUsuario(usuario);
 
     if (tentativa !== controleSessao) return;
 
     if (auth.currentUser?.uid !== usuario.uid) return;
 
-    mostrarPainel(dados);
+    if (dados.perfil === "admin") {
+      mostrarPainel(dados);
+
+    } else if (dados.perfil === "fornecedor") {
+      mostrarPainelFornecedor(dados, usuario.uid);
+    }
 
   } catch (erro) {
-
     if (tentativa !== controleSessao) return;
 
     console.error("Erro ao verificar acesso:", erro);
