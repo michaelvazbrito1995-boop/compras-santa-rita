@@ -16,14 +16,7 @@ import {
   getDocs,
   addDoc,
   updateDoc,
-  serverTimestamp,
-  query,
-  orderBy,
-  limit,
-  startAfter,
-  startAt,
-  endAt,
-  where
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -45,8 +38,8 @@ const container = document.querySelector(".container");
 const LIMITE_PRODUTOS = 5;
 
 let produtosCarregados = [];
+let produtosEncontrados = [];
 let produtoEditandoId = null;
-let cursoresPaginas = [null];
 let paginaAtual = 0;
 let temProximaPagina = false;
 
@@ -58,6 +51,13 @@ function escaparHTML(texto) {
     '"': "&quot;",
     "'": "&#039;"
   })[caractere]);
+}
+
+function normalizarTexto(texto) {
+  return String(texto ?? "")
+    .toLocaleLowerCase("pt-BR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function mostrarMensagem(texto, erro = false) {
@@ -147,7 +147,86 @@ function mostrarPainel(dados) {
   });
 
   document.getElementById("sair").addEventListener("click", async () => {
-    await signOut(auth);
+    const botao = document.getElementById("sair");
+
+    botao.disabled = true;
+    botao.textContent = "SAINDO...";
+
+    try {
+      await signOut(auth);
+      mostrarTelaLogin();
+
+    } catch (erro) {
+      console.error("Erro ao sair:", erro);
+      alert("Não foi possível sair. Tente novamente.");
+
+      botao.disabled = false;
+      botao.textContent = "SAIR";
+    }
+  });
+}
+
+function mostrarTelaLogin() {
+  container.innerHTML = `
+    <section class="login-card">
+      <h2>Bem-vindo!</h2>
+      <p>Entre com seu e-mail e senha para acessar o sistema.</p>
+
+      <form id="login-form">
+        <label for="email">E-mail</label>
+        <input
+          type="email"
+          id="email"
+          placeholder="Digite seu e-mail"
+          required
+        >
+
+        <label for="senha">Senha</label>
+        <input
+          type="password"
+          id="senha"
+          placeholder="Digite sua senha"
+          required
+        >
+
+        <button type="submit">ENTRAR</button>
+        <p id="mensagem"></p>
+      </form>
+    </section>
+  `;
+
+  const novoFormulario = document.getElementById("login-form");
+
+  novoFormulario.addEventListener("submit", async evento => {
+    evento.preventDefault();
+
+    const email = document.getElementById("email").value.trim();
+    const senha = document.getElementById("senha").value;
+    const botao = novoFormulario.querySelector("button");
+
+    mostrarMensagem("Verificando acesso...");
+
+    botao.disabled = true;
+    botao.textContent = "AGUARDE...";
+
+    try {
+      await signInWithEmailAndPassword(auth, email, senha);
+
+    } catch (erro) {
+      console.error("Erro no login:", erro);
+
+      let texto = "Não foi possível entrar no sistema.";
+
+      if (erro.code === "auth/invalid-credential") {
+        texto = "E-mail ou senha incorretos.";
+      } else if (erro.code === "auth/network-request-failed") {
+        texto = "Erro de conexão. Verifique sua internet.";
+      }
+
+      mostrarMensagem(texto, true);
+      botao.disabled = false;
+      botao.textContent = "ENTRAR";
+    }
   });
 }
 
@@ -156,7 +235,6 @@ async function abrirModulo(tela) {
 
   if (tela === "produtos") {
     produtoEditandoId = null;
-    cursoresPaginas = [null];
     paginaAtual = 0;
 
     conteudo.innerHTML = `
@@ -355,61 +433,36 @@ async function carregarProdutos() {
   if (mensagem) mensagem.textContent = "";
 
   try {
-    const pesquisa = document.getElementById("pesquisa-produto").value.trim();
+    const pesquisa = normalizarTexto(
+      document.getElementById("pesquisa-produto").value.trim()
+    );
 
     const referencia = collection(db, "produtos");
-    let consulta;
+    const resultado = await getDocs(referencia);
 
-    // Pesquisa por código de barras exato.
-    if (/^\d+$/.test(pesquisa)) {
-      const filtros = [
-        where("codigoBarras", "==", pesquisa)
-      ];
-
-      if (cursoresPaginas[paginaAtual]) {
-        filtros.push(startAfter(cursoresPaginas[paginaAtual]));
-      }
-
-      filtros.push(limit(LIMITE_PRODUTOS + 1));
-
-      consulta = query(referencia, ...filtros);
-
-    } else {
-      // Pesquisa pelo início do nome.
-      const filtros = [
-        orderBy("nome")
-      ];
-
-      if (pesquisa) {
-        filtros.push(startAt(pesquisa));
-        filtros.push(endAt(pesquisa + "\uf8ff"));
-      }
-
-      if (cursoresPaginas[paginaAtual]) {
-        filtros.push(startAfter(cursoresPaginas[paginaAtual]));
-      }
-
-      filtros.push(limit(LIMITE_PRODUTOS + 1));
-
-      consulta = query(referencia, ...filtros);
-    }
-
-    const resultado = await getDocs(consulta);
-
-    temProximaPagina = resultado.docs.length > LIMITE_PRODUTOS;
-
-    const documentosVisiveis = resultado.docs.slice(0, LIMITE_PRODUTOS);
-
-    produtosCarregados = documentosVisiveis.map(documento => ({
+    const todosProdutos = resultado.docs.map(documento => ({
       id: documento.id,
       ...documento.data()
     }));
 
-    window.ultimoProdutoConsultado =
-      documentosVisiveis.length > 0
-        ? documentosVisiveis[documentosVisiveis.length - 1]
-        : null;
+    produtosEncontrados = todosProdutos
+      .filter(produto => {
+        const nome = normalizarTexto(produto.nome);
+        const codigo = String(produto.codigoBarras || "");
 
+        return (
+          nome.includes(pesquisa) ||
+          codigo.includes(pesquisa)
+        );
+      })
+      .sort((a, b) =>
+        String(a.nome || "").localeCompare(
+          String(b.nome || ""),
+          "pt-BR"
+        )
+      );
+
+    paginaAtual = 0;
     renderizarProdutos();
 
   } catch (erro) {
@@ -418,11 +471,7 @@ async function carregarProdutos() {
     lista.textContent = "Não foi possível carregar os produtos.";
 
     if (mensagem) {
-      mensagem.textContent =
-        erro.code === "failed-precondition"
-          ? "O Firebase precisa preparar um índice para esta consulta. Verifique a mensagem no console."
-          : "Verifique sua conexão e tente novamente.";
-
+      mensagem.textContent = "Verifique sua conexão e tente novamente.";
       mensagem.style.color = "#c62828";
     }
   }
@@ -435,6 +484,13 @@ function renderizarProdutos() {
   const proxima = document.getElementById("pagina-proxima");
 
   if (!lista) return;
+
+  const inicio = paginaAtual * LIMITE_PRODUTOS;
+  const fim = inicio + LIMITE_PRODUTOS;
+
+  produtosCarregados = produtosEncontrados.slice(inicio, fim);
+
+  temProximaPagina = produtosEncontrados.length > fim;
 
   numeroPagina.textContent = `Página ${paginaAtual + 1}`;
 
@@ -501,24 +557,21 @@ function renderizarProdutos() {
 
 async function pesquisarProdutos() {
   paginaAtual = 0;
-  cursoresPaginas = [null];
   await carregarProdutos();
 }
 
-async function proximaPagina() {
-  if (!temProximaPagina || !window.ultimoProdutoConsultado) return;
+function proximaPagina() {
+  if (!temProximaPagina) return;
 
-  cursoresPaginas[paginaAtual + 1] = window.ultimoProdutoConsultado;
   paginaAtual++;
-
-  await carregarProdutos();
+  renderizarProdutos();
 }
 
-async function paginaAnterior() {
+function paginaAnterior() {
   if (paginaAtual === 0) return;
 
   paginaAtual--;
-  await carregarProdutos();
+  renderizarProdutos();
 }
 
 function editarProduto(id) {
@@ -600,8 +653,6 @@ async function salvarProduto(evento) {
     limparFormularioProduto();
 
     paginaAtual = 0;
-    cursoresPaginas = [null];
-
     await carregarProdutos();
 
     mostrarMensagemProduto(
@@ -654,7 +705,7 @@ async function alterarStatusProduto(id) {
   }
 }
 
-// LOGIN
+// LOGIN INICIAL
 if (formulario) {
   formulario.addEventListener("submit", async evento => {
     evento.preventDefault();
@@ -691,7 +742,10 @@ if (formulario) {
 
 // ACOMPANHAR SESSÃO
 onAuthStateChanged(auth, async usuario => {
-  if (!usuario) return;
+  if (!usuario) {
+    mostrarTelaLogin();
+    return;
+  }
 
   try {
     const dados = await verificarAdministrador(usuario);
@@ -701,5 +755,6 @@ onAuthStateChanged(auth, async usuario => {
     console.error("Erro ao verificar acesso:", erro);
     alert(erro.message);
     await signOut(auth);
+    mostrarTelaLogin();
   }
 });
