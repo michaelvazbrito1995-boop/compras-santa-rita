@@ -261,3 +261,129 @@ footer span {
     font-size: 12px;
   }
 }
+
+/* MÓDULO DE PRODUTOS */
+
+#form-produto {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#form-produto label {
+  margin: 10px 0 4px;
+}
+
+#form-produto input,
+#form-produto select,
+#pesquisa-produto {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 16px;
+  background: white;
+}
+
+#form-produto input:focus,
+#form-produto select:focus,
+#pesquisa-produto:focus {
+  outline: none;
+  border-color: #e3b500;
+}
+
+#form-produto .produto-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: normal;
+}
+
+#form-produto .produto-status input {
+  width: 20px;
+  height: 20px;
+  accent-color: #d6a900;
+}
+
+#form-produto button,
+#conteudo-modulo .modulo-aberto > button {
+  width: 100%;
+  padding: 14px;
+  background: #f5c928;
+  color: #292929;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: bold;
+  margin-top: 10px;
+}
+
+#form-produto button:disabled {
+  opacity: 0.6;
+}
+
+#pesquisa-produto {
+  margin: 15px 0;
+}
+
+#total-produtos {
+  color: #666;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+#lista-produtos .aviso-modulo {
+  background: #fffdf3;
+  border: 1px solid #eee2a7;
+  border-left: 4px solid #f5c928;
+  padding: 16px;
+  border-radius: 9px;
+}
+
+#lista-produtos .aviso-modulo strong {
+  color: #292929;
+  font-size: 17px;
+}
+
+#lista-produtos .aviso-modulo p {
+  margin: 7px 0;
+  font-size: 14px;
+}
+
+#lista-produtos button {
+  padding: 10px 13px;
+  margin: 8px 5px 0 0;
+  border: none;
+  border-radius: 7px;
+  background: #f5c928;
+  color: #292929;
+  font-weight: bold;
+}
+
+#lista-produtos button[data-alterar-status] {
+  background: #333;
+  color: white;
+}
+
+#conteudo-modulo hr {
+  border: none;
+  border-top: 1px solid #eee;
+}
+
+/* AJUSTES PARA CELULAR */
+
+@media (max-width: 480px) {
+  .modulo-aberto {
+    padding: 18px 14px;
+  }
+
+  .modulo-aberto h2 {
+    font-size: 20px;
+  }
+
+  #lista-produtos button {
+    font-size: 12px;
+    padding: 11px 10px;
+  }
+}
