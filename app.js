@@ -16,7 +16,14 @@ import {
   getDocs,
   addDoc,
   updateDoc,
-  serverTimestamp
+  serverTimestamp,
+  query,
+  orderBy,
+  limit,
+  startAfter,
+  startAt,
+  endAt,
+  where
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -35,8 +42,13 @@ const db = getFirestore(app);
 const formulario = document.getElementById("login-form");
 const container = document.querySelector(".container");
 
+const LIMITE_PRODUTOS = 30;
+
 let produtosCarregados = [];
 let produtoEditandoId = null;
+let cursoresPaginas = [null];
+let paginaAtual = 0;
+let temProximaPagina = false;
 
 function escaparHTML(texto) {
   return String(texto ?? "").replace(/[&<>"']/g, caractere => ({
@@ -144,77 +156,128 @@ async function abrirModulo(tela) {
 
   if (tela === "produtos") {
     produtoEditandoId = null;
+    cursoresPaginas = [null];
+    paginaAtual = 0;
 
     conteudo.innerHTML = `
       <div class="modulo-aberto">
-        <h2>📦 Cadastro de produtos</h2>
-        <p>Cadastre e gerencie as mercadorias do supermercado.</p>
 
-        <div id="mensagem-produto"></div>
+        <h2>📦 Produtos</h2>
+        <p>Gerenciamento de mercadorias do supermercado.</p>
 
-        <form id="form-produto">
+        <button type="button" id="abrir-formulario-produto">
+          + CADASTRAR PRODUTO
+        </button>
 
-          <label for="produto-nome">Nome do produto</label>
-          <input id="produto-nome" type="text"
-            placeholder="Ex.: Arroz 5kg" required>
+        <div id="area-formulario-produto" style="display:none">
 
-          <label for="produto-codigo">Código de barras</label>
-          <input id="produto-codigo" type="text"
-            placeholder="Digite o código de barras">
+          <form id="form-produto">
 
-          <label for="produto-departamento">Departamento</label>
-          <input id="produto-departamento" type="text"
-            placeholder="Ex.: Mercearia" required>
+            <h3 id="titulo-form-produto">Novo produto</h3>
 
-          <label for="produto-categoria">Categoria</label>
-          <input id="produto-categoria" type="text"
-            placeholder="Ex.: Arroz e grãos" required>
+            <label for="produto-nome">Nome do produto</label>
+            <input id="produto-nome" type="text"
+              placeholder="Ex.: Arroz 5kg" required>
 
-          <label for="produto-unidade">Unidade</label>
-          <select id="produto-unidade" required>
-            <option value="">Selecione</option>
-            <option value="UN">Unidade (UN)</option>
-            <option value="KG">Quilo (KG)</option>
-            <option value="CX">Caixa (CX)</option>
-            <option value="FD">Fardo (FD)</option>
-            <option value="PCT">Pacote (PCT)</option>
-            <option value="LT">Litro (LT)</option>
-            <option value="ML">Mililitro (ML)</option>
-            <option value="GR">Grama (GR)</option>
-            <option value="SC">Saco (SC)</option>
-            <option value="DZ">Dúzia (DZ)</option>
-          </select>
+            <label for="produto-codigo">Código de barras</label>
+            <input id="produto-codigo" type="text"
+              placeholder="Código de barras">
 
-          <label class="produto-status">
-            <input id="produto-ativo" type="checkbox" checked>
-            Produto ativo
-          </label>
+            <label for="produto-departamento">Departamento</label>
+            <input id="produto-departamento" type="text"
+              placeholder="Ex.: Mercearia" required>
 
-          <button type="submit" id="botao-salvar-produto">
-            CADASTRAR PRODUTO
-          </button>
+            <label for="produto-categoria">Categoria</label>
+            <input id="produto-categoria" type="text"
+              placeholder="Ex.: Arroz e grãos" required>
 
-          <button type="button" id="cancelar-edicao"
-            style="display:none">
-            CANCELAR EDIÇÃO
-          </button>
-        </form>
+            <label for="produto-unidade">Unidade</label>
+            <select id="produto-unidade" required>
+              <option value="">Selecione</option>
+              <option value="UN">Unidade (UN)</option>
+              <option value="KG">Quilo (KG)</option>
+              <option value="CX">Caixa (CX)</option>
+              <option value="FD">Fardo (FD)</option>
+              <option value="PCT">Pacote (PCT)</option>
+              <option value="LT">Litro (LT)</option>
+              <option value="ML">Mililitro (ML)</option>
+              <option value="GR">Grama (GR)</option>
+              <option value="SC">Saco (SC)</option>
+              <option value="DZ">Dúzia (DZ)</option>
+            </select>
+
+            <label class="produto-status">
+              <input id="produto-ativo" type="checkbox" checked>
+              Produto ativo
+            </label>
+
+            <button type="submit" id="botao-salvar-produto">
+              SALVAR PRODUTO
+            </button>
+
+            <button type="button" id="cancelar-edicao">
+              CANCELAR
+            </button>
+
+          </form>
+
+          <div id="mensagem-produto"></div>
+        </div>
 
         <hr style="margin:25px 0;">
 
-        <h2>Produtos cadastrados</h2>
+        <h3>Consultar produtos</h3>
 
+        <label for="pesquisa-produto">Nome ou código de barras</label>
         <input id="pesquisa-produto" type="search"
-          placeholder="Pesquisar por nome ou código de barras">
+          placeholder="Digite o nome ou código...">
 
-        <p id="total-produtos"></p>
-        <div id="lista-produtos">Carregando produtos...</div>
+        <label for="filtro-departamento">Departamento</label>
+        <input id="filtro-departamento" type="text"
+          placeholder="Digite o departamento exato">
+
+        <label for="filtro-status">Situação</label>
+        <select id="filtro-status">
+          <option value="todos">Todos os produtos</option>
+          <option value="ativos">Somente ativos</option>
+          <option value="inativos">Somente inativos</option>
+        </select>
+
+        <button type="button" id="buscar-produtos">
+          PESQUISAR
+        </button>
+
+        <div id="mensagem-lista"></div>
+
+        <div id="lista-produtos"></div>
+
+        <div id="paginacao-produtos"
+          style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:20px">
+
+          <button type="button" id="pagina-anterior">
+            ANTERIOR
+          </button>
+
+          <strong id="numero-pagina">Página 1</strong>
+
+          <button type="button" id="pagina-proxima">
+            PRÓXIMA
+          </button>
+
+        </div>
 
         <button type="button" id="voltar-painel">
           VOLTAR AO PAINEL
         </button>
+
       </div>
     `;
+
+    document.getElementById("abrir-formulario-produto")
+      .addEventListener("click", () => {
+        limparFormularioProduto();
+        document.getElementById("area-formulario-produto").style.display = "block";
+      });
 
     document.getElementById("form-produto")
       .addEventListener("submit", salvarProduto);
@@ -222,8 +285,24 @@ async function abrirModulo(tela) {
     document.getElementById("cancelar-edicao")
       .addEventListener("click", limparFormularioProduto);
 
+    document.getElementById("buscar-produtos")
+      .addEventListener("click", pesquisarProdutos);
+
     document.getElementById("pesquisa-produto")
-      .addEventListener("input", renderizarProdutos);
+      .addEventListener("keydown", evento => {
+        if (evento.key === "Enter") pesquisarProdutos();
+      });
+
+    document.getElementById("filtro-departamento")
+      .addEventListener("keydown", evento => {
+        if (evento.key === "Enter") pesquisarProdutos();
+      });
+
+    document.getElementById("pagina-anterior")
+      .addEventListener("click", paginaAnterior);
+
+    document.getElementById("pagina-proxima")
+      .addEventListener("click", proximaPagina);
 
     document.getElementById("voltar-painel")
       .addEventListener("click", () => {
@@ -272,79 +351,173 @@ async function abrirModulo(tela) {
   });
 }
 
+function mostrarMensagemProduto(texto, erro = false) {
+  const elemento = document.getElementById("mensagem-produto");
+
+  if (!elemento) return;
+
+  elemento.textContent = texto;
+  elemento.style.color = erro ? "#c62828" : "#267326";
+  elemento.style.margin = "12px 0";
+}
+
 async function carregarProdutos() {
   const lista = document.getElementById("lista-produtos");
+  const mensagem = document.getElementById("mensagem-lista");
 
   if (!lista) return;
 
   lista.textContent = "Carregando produtos...";
+  if (mensagem) mensagem.textContent = "";
 
   try {
-    const consulta = await getDocs(collection(db, "produtos"));
+    const pesquisa = document.getElementById("pesquisa-produto").value.trim();
+    const departamento = document.getElementById("filtro-departamento").value.trim();
+    const status = document.getElementById("filtro-status").value;
 
-    produtosCarregados = consulta.docs.map(documento => ({
+    const condicoes = [];
+
+    if (departamento) {
+      condicoes.push(where("departamento", "==", departamento));
+    }
+
+    if (status === "ativos") {
+      condicoes.push(where("ativo", "==", true));
+    }
+
+    if (status === "inativos") {
+      condicoes.push(where("ativo", "==", false));
+    }
+
+    const referencia = collection(db, "produtos");
+    let consulta;
+
+    // Pesquisa numérica: código de barras exato.
+    if (/^\d+$/.test(pesquisa)) {
+      consulta = query(
+        referencia,
+        where("codigoBarras", "==", pesquisa),
+        ...condicoes,
+        limit(LIMITE_PRODUTOS)
+      );
+
+    } else {
+      // Pesquisa por início do nome.
+      const filtros = [
+        ...condicoes,
+        orderBy("nome")
+      ];
+
+      if (pesquisa) {
+        filtros.push(startAt(pesquisa));
+        filtros.push(endAt(pesquisa + "\uf8ff"));
+      }
+
+      filtros.push(limit(LIMITE_PRODUTOS));
+
+      if (cursoresPaginas[paginaAtual]) {
+        filtros.splice(
+          filtros.length - 1,
+          0,
+          startAfter(cursoresPaginas[paginaAtual])
+        );
+      }
+
+      consulta = query(referencia, ...filtros);
+    }
+
+    const resultado = await getDocs(consulta);
+
+    produtosCarregados = resultado.docs.map(documento => ({
       id: documento.id,
       ...documento.data()
     }));
 
+    temProximaPagina = resultado.docs.length === LIMITE_PRODUTOS;
+
+    // Guarda o último documento para avançar na paginação.
+    window.ultimoProdutoConsultado =
+      resultado.docs.length > 0
+        ? resultado.docs[resultado.docs.length - 1]
+        : null;
+
     renderizarProdutos();
 
   } catch (erro) {
-    console.error("Erro ao carregar produtos:", erro);
+    console.error("Erro ao consultar produtos:", erro);
+
     lista.textContent = "Não foi possível carregar os produtos.";
+
+    if (mensagem) {
+      mensagem.textContent =
+        erro.code === "failed-precondition"
+          ? "O Firebase precisa preparar um índice para este filtro. Verifique a mensagem no console."
+          : "Verifique sua conexão e tente novamente.";
+
+      mensagem.style.color = "#c62828";
+    }
   }
 }
 
 function renderizarProdutos() {
   const lista = document.getElementById("lista-produtos");
-  const total = document.getElementById("total-produtos");
-  const pesquisa = document.getElementById("pesquisa-produto");
+  const numeroPagina = document.getElementById("numero-pagina");
+  const anterior = document.getElementById("pagina-anterior");
+  const proxima = document.getElementById("pagina-proxima");
 
-  if (!lista || !total || !pesquisa) return;
+  if (!lista) return;
 
-  const termo = pesquisa.value.trim().toLowerCase();
+  numeroPagina.textContent = `Página ${paginaAtual + 1}`;
 
-  const filtrados = produtosCarregados.filter(produto => {
-    const nome = String(produto.nome || "").toLowerCase();
-    const codigo = String(produto.codigoBarras || "").toLowerCase();
+  anterior.disabled = paginaAtual === 0;
+  proxima.disabled = !temProximaPagina;
 
-    return nome.includes(termo) || codigo.includes(termo);
-  });
-
-  total.textContent =
-    `${filtrados.length} produto(s) encontrado(s).`;
-
-  if (filtrados.length === 0) {
-    lista.innerHTML = "<p>Nenhum produto encontrado.</p>";
+  if (produtosCarregados.length === 0) {
+    lista.innerHTML = `
+      <div class="aviso-modulo">
+        Nenhum produto encontrado.
+      </div>
+    `;
     return;
   }
 
-  lista.innerHTML = filtrados.map(produto => {
+  lista.innerHTML = produtosCarregados.map(produto => {
     const ativo = produto.ativo === true;
 
     return `
-      <div class="aviso-modulo" style="margin-bottom:12px">
+      <div class="aviso-modulo produto-linha">
 
-        <strong>${escaparHTML(produto.nome)}</strong>
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <strong>${escaparHTML(produto.nome)}</strong>
 
-        <p>Código: ${escaparHTML(produto.codigoBarras || "Não informado")}</p>
-        <p>Departamento: ${escaparHTML(produto.departamento)}</p>
-        <p>Categoria: ${escaparHTML(produto.categoria)}</p>
-        <p>Unidade: ${escaparHTML(produto.unidade)}</p>
+          <span style="
+            font-size:12px;
+            font-weight:bold;
+            color:${ativo ? "#267326" : "#c62828"}">
+            ${ativo ? "ATIVO" : "INATIVO"}
+          </span>
+        </div>
 
         <p>
-          Status:
-          <strong>${ativo ? "ATIVO" : "INATIVO"}</strong>
+          ${escaparHTML(produto.departamento || "")}
+          · ${escaparHTML(produto.categoria || "")}
+          · ${escaparHTML(produto.unidade || "")}
         </p>
 
-        <button type="button" data-editar="${escaparHTML(produto.id)}">
-          EDITAR
-        </button>
+        <details>
+          <summary>Ver detalhes e ações</summary>
 
-        <button type="button"
-          data-alterar-status="${escaparHTML(produto.id)}">
-          ${ativo ? "DESATIVAR" : "ATIVAR"}
-        </button>
+          <p>Código: ${escaparHTML(produto.codigoBarras || "Não informado")}</p>
+
+          <button type="button" data-editar="${escaparHTML(produto.id)}">
+            EDITAR
+          </button>
+
+          <button type="button"
+            data-alterar-status="${escaparHTML(produto.id)}">
+            ${ativo ? "DESATIVAR" : "ATIVAR"}
+          </button>
+        </details>
 
       </div>
     `;
@@ -363,12 +536,37 @@ function renderizarProdutos() {
   });
 }
 
+async function pesquisarProdutos() {
+  paginaAtual = 0;
+  cursoresPaginas = [null];
+  await carregarProdutos();
+}
+
+async function proximaPagina() {
+  if (!temProximaPagina || !window.ultimoProdutoConsultado) return;
+
+  cursoresPaginas[paginaAtual + 1] = window.ultimoProdutoConsultado;
+  paginaAtual++;
+
+  await carregarProdutos();
+}
+
+async function paginaAnterior() {
+  if (paginaAtual === 0) return;
+
+  paginaAtual--;
+  await carregarProdutos();
+}
+
 function editarProduto(id) {
   const produto = produtosCarregados.find(item => item.id === id);
 
   if (!produto) return;
 
   produtoEditandoId = id;
+
+  document.getElementById("area-formulario-produto").style.display = "block";
+  document.getElementById("titulo-form-produto").textContent = "Editar produto";
 
   document.getElementById("produto-nome").value = produto.nome || "";
   document.getElementById("produto-codigo").value = produto.codigoBarras || "";
@@ -379,8 +577,6 @@ function editarProduto(id) {
 
   document.getElementById("botao-salvar-produto").textContent =
     "ATUALIZAR PRODUTO";
-
-  document.getElementById("cancelar-edicao").style.display = "block";
 
   document.getElementById("produto-nome").scrollIntoView({
     behavior: "smooth",
@@ -394,28 +590,22 @@ function limparFormularioProduto() {
   document.getElementById("form-produto").reset();
   document.getElementById("produto-ativo").checked = true;
 
-  document.getElementById("botao-salvar-produto").textContent =
-    "CADASTRAR PRODUTO";
+  document.getElementById("titulo-form-produto").textContent = "Novo produto";
 
-  document.getElementById("cancelar-edicao").style.display = "none";
+  document.getElementById("botao-salvar-produto").textContent =
+    "SALVAR PRODUTO";
+
+  document.getElementById("area-formulario-produto").style.display = "none";
 
   mostrarMensagemProduto("");
-}
-
-function mostrarMensagemProduto(texto, erro = false) {
-  const elemento = document.getElementById("mensagem-produto");
-
-  if (!elemento) return;
-
-  elemento.textContent = texto;
-  elemento.style.color = erro ? "#c62828" : "#267326";
-  elemento.style.margin = "12px 0";
 }
 
 async function salvarProduto(evento) {
   evento.preventDefault();
 
   const botao = document.getElementById("botao-salvar-produto");
+
+  const idEmEdicao = produtoEditandoId;
 
   const dados = {
     nome: document.getElementById("produto-nome").value.trim(),
@@ -435,45 +625,49 @@ async function salvarProduto(evento) {
   botao.textContent = "SALVANDO...";
 
   try {
-    if (produtoEditandoId) {
-      await updateDoc(
-        doc(db, "produtos", produtoEditandoId),
-        dados
-      );
-
-      mostrarMensagemProduto("Produto atualizado com sucesso!");
+    if (idEmEdicao) {
+      await updateDoc(doc(db, "produtos", idEmEdicao), dados);
 
     } else {
       await addDoc(collection(db, "produtos"), {
         ...dados,
         criadoEm: serverTimestamp()
       });
-
-      mostrarMensagemProduto("Produto cadastrado com sucesso!");
     }
 
     limparFormularioProduto();
+
     mostrarMensagemProduto(
-      produtoEditandoId
+      idEmEdicao
         ? "Produto atualizado com sucesso!"
         : "Produto cadastrado com sucesso!"
     );
 
+    paginaAtual = 0;
+    cursoresPaginas = [null];
+
     await carregarProdutos();
+
+    // Mantém o aviso de sucesso visível.
+    mostrarMensagemProduto(
+      idEmEdicao
+        ? "Produto atualizado com sucesso!"
+        : "Produto cadastrado com sucesso!"
+    );
 
   } catch (erro) {
     console.error("Erro ao salvar produto:", erro);
+
     mostrarMensagemProduto(
-      "Erro ao salvar. Verifique sua conexão e tente novamente.",
+      "Não foi possível salvar o produto. Tente novamente.",
       true
     );
 
   } finally {
     botao.disabled = false;
-
-    if (!produtoEditandoId) {
-      botao.textContent = "CADASTRAR PRODUTO";
-    }
+    botao.textContent = produtoEditandoId
+      ? "ATUALIZAR PRODUTO"
+      : "SALVAR PRODUTO";
   }
 }
 
@@ -486,8 +680,8 @@ async function alterarStatusProduto(id) {
 
   const confirmacao = confirm(
     novoStatus
-      ? `Deseja ativar o produto "${produto.nome}"?`
-      : `Deseja desativar o produto "${produto.nome}"?`
+      ? `Deseja ativar "${produto.nome}"?`
+      : `Deseja desativar "${produto.nome}"?`
   );
 
   if (!confirmacao) return;
