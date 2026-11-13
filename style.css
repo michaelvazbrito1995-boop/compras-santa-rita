@@ -388,7 +388,7 @@ footer span {
   }
 }
 
-/* LISTA COMPACTA DE PRODUTOS */
+/* LISTA DE PRODUTOS */
 
 .produto-linha {
   padding: 9px 11px !important;
@@ -401,22 +401,22 @@ footer span {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-}
-
-.produto-cabecalho {
-  display: flex;
-  justify-content: flex-start;
-  align-items: center;
   width: 100%;
-  gap: 0;
 }
 
 .produto-cabecalho strong {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   font-size: 13px !important;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.produto-situacao {
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 .produto-codigo {
