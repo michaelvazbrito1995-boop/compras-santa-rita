@@ -421,7 +421,6 @@ async function carregarProdutos() {
       ...documento.data()
     }));
 
-    // Usa o último produto exibido como referência da próxima página.
     window.ultimoProdutoConsultado =
       documentosVisiveis.length > 0
         ? documentosVisiveis[documentosVisiveis.length - 1]
@@ -475,11 +474,6 @@ function renderizarProdutos() {
 
         <div class="produto-cabecalho">
           <strong>${escaparHTML(produto.nome)}</strong>
-
-          <span class="produto-situacao"
-            style="color:${ativo ? "#267326" : "#c62828"}">
-            ${ativo ? "ATIVO" : "INATIVO"}
-          </span>
         </div>
 
         <p class="produto-codigo">
