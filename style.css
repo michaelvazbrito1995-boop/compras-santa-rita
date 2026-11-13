@@ -387,3 +387,29 @@ footer span {
     padding: 11px 10px;
   }
 }
+/* LISTA COMPACTA DE PRODUTOS */
+
+.produto-linha {
+  padding: 11px 12px !important;
+  margin-bottom: 8px !important;
+}
+
+.produto-linha > div > strong {
+  font-size: 14px !important;
+}
+
+.produto-linha p {
+  font-size: 12px !important;
+  margin: 5px 0 !important;
+}
+
+.produto-linha summary {
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.produto-linha button {
+  font-size: 11px !important;
+  padding: 8px 10px !important;
+}
