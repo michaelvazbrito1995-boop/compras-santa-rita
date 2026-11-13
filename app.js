@@ -47,13 +47,26 @@ async function verificarAdministrador(usuario) {
   const resultado = await getDoc(referencia);
 
   if (!resultado.exists()) {
-    throw new Error("Cadastro de usuário não encontrado.");
+    throw new Error(
+      "Cadastro não encontrado para o UID: " + usuario.uid
+    );
   }
 
   const dados = resultado.data();
 
+  // MOSTRAR DADOS PARA DIAGNÓSTICO
+  console.log("UID autenticado:", usuario.uid);
+  console.log("Dados recebidos do Firestore:", dados);
+  console.log("Perfil recebido:", dados.perfil);
+  console.log("Ativo recebido:", dados.ativo);
+
   if (dados.perfil !== "admin" || dados.ativo !== true) {
-    throw new Error("Este usuário não tem acesso de administrador.");
+    throw new Error(
+      "Dados recebidos: perfil = " +
+      JSON.stringify(dados.perfil) +
+      " | ativo = " +
+      JSON.stringify(dados.ativo)
+    );
   }
 
   return dados;
@@ -81,27 +94,32 @@ formulario.addEventListener("submit", async (evento) => {
 
     const dados = await verificarAdministrador(credencial.user);
 
-    mostrarMensagem("Acesso autorizado! Bem-vindo, " + (dados.nome || "Administrador") + ".");
+    mostrarMensagem(
+      "Acesso autorizado! Bem-vindo, " +
+      (dados.nome || "Administrador") + "."
+    );
 
-    setTimeout(() => {
-      mostrarPainel(dados);
-    }, 700);
+    mostrarPainel(dados);
 
   } catch (erro) {
-    console.error(erro);
+    console.error("ERRO NO LOGIN:", erro);
 
-    let texto = "Não foi possível entrar. Confira seu e-mail e senha.";
+    let texto = erro.message;
 
     if (erro.code === "auth/invalid-credential") {
       texto = "E-mail ou senha incorretos.";
-    } else if (erro.message.includes("administrador") ||
-               erro.message.includes("Cadastro de usuário")) {
-      texto = erro.message;
     } else if (erro.code === "auth/network-request-failed") {
       texto = "Erro de conexão. Verifique sua internet.";
+    } else if (erro.code === "permission-denied") {
+      texto = "O Firebase não permitiu ler o cadastro. Precisamos conferir as regras.";
     }
 
     mostrarMensagem(texto, true);
+
+    if (auth.currentUser) {
+      await signOut(auth);
+    }
+
   } finally {
     botao.disabled = false;
     botao.textContent = "ENTRAR";
@@ -125,7 +143,7 @@ function mostrarPainel(dados) {
   });
 }
 
-// PROTEÇÃO CONTRA TEXTO HTML INDESEJADO
+// PROTEÇÃO DE TEXTO
 function escaparHTML(texto) {
   return String(texto).replace(/[&<>"']/g, caractere => ({
     "&": "&amp;",
@@ -136,7 +154,7 @@ function escaparHTML(texto) {
   })[caractere]);
 }
 
-// VERIFICAR SE JÁ EXISTE UMA SESSÃO
+// VERIFICAR SESSÃO EXISTENTE
 onAuthStateChanged(auth, async (usuario) => {
   if (!usuario) return;
 
@@ -144,8 +162,10 @@ onAuthStateChanged(auth, async (usuario) => {
     const dados = await verificarAdministrador(usuario);
     mostrarPainel(dados);
   } catch (erro) {
-    console.error(erro);
-    mostrarMensagem("Acesso não autorizado. Faça login novamente.", true);
-    await signOut(auth);
+    console.error("ERRO AO RESTAURAR SESSÃO:", erro);
+
+    if (auth.currentUser) {
+      await signOut(auth);
+    }
   }
 });
