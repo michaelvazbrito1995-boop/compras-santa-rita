@@ -14,7 +14,7 @@ import {
   getDoc
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
-// CONFIGURAÇÃO DO FIREBASE
+// FIREBASE
 const firebaseConfig = {
   apiKey: "AIzaSyBX9Yj8qGBvT_5N4dIcmyxNbeonuEcPzDw",
   authDomain: "compras-santa-rita.firebaseapp.com",
@@ -24,123 +24,22 @@ const firebaseConfig = {
   appId: "1:340040395262:web:ba467489d4176efdf5f8af"
 };
 
-// INICIALIZAÇÃO
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ELEMENTOS DA TELA
+// ELEMENTOS
 const formulario = document.getElementById("login-form");
-const campoEmail = document.getElementById("email");
-const campoSenha = document.getElementById("senha");
-const mensagem = document.getElementById("mensagem");
+const container = document.querySelector(".container");
 
-// MENSAGENS
+// MENSAGEM DO LOGIN
 function mostrarMensagem(texto, erro = false) {
+  const mensagem = document.getElementById("mensagem");
+
+  if (!mensagem) return;
+
   mensagem.textContent = texto;
   mensagem.style.color = erro ? "#c62828" : "#267326";
-}
-
-// VERIFICAR PERFIL DO USUÁRIO
-async function verificarAdministrador(usuario) {
-  const referencia = doc(db, "usuarios", usuario.uid);
-  const resultado = await getDoc(referencia);
-
-  if (!resultado.exists()) {
-    throw new Error(
-      "Cadastro não encontrado para o UID: " + usuario.uid
-    );
-  }
-
-  const dados = resultado.data();
-
-  // MOSTRAR DADOS PARA DIAGNÓSTICO
-  console.log("UID autenticado:", usuario.uid);
-  console.log("Dados recebidos do Firestore:", dados);
-  console.log("Perfil recebido:", dados.perfil);
-  console.log("Ativo recebido:", dados.ativo);
-
-  if (dados.perfil !== "admin" || dados.ativo !== true) {
-    throw new Error(
-      "Dados recebidos: perfil = " +
-      JSON.stringify(dados.perfil) +
-      " | ativo = " +
-      JSON.stringify(dados.ativo)
-    );
-  }
-
-  return dados;
-}
-
-// LOGIN
-formulario.addEventListener("submit", async (evento) => {
-  evento.preventDefault();
-
-  const email = campoEmail.value.trim();
-  const senha = campoSenha.value;
-
-  mostrarMensagem("Verificando acesso...");
-
-  const botao = formulario.querySelector("button");
-  botao.disabled = true;
-  botao.textContent = "AGUARDE...";
-
-  try {
-    const credencial = await signInWithEmailAndPassword(
-      auth,
-      email,
-      senha
-    );
-
-    const dados = await verificarAdministrador(credencial.user);
-
-    mostrarMensagem(
-      "Acesso autorizado! Bem-vindo, " +
-      (dados.nome || "Administrador") + "."
-    );
-
-    mostrarPainel(dados);
-
-  } catch (erro) {
-    console.error("ERRO NO LOGIN:", erro);
-
-    let texto = erro.message;
-
-    if (erro.code === "auth/invalid-credential") {
-      texto = "E-mail ou senha incorretos.";
-    } else if (erro.code === "auth/network-request-failed") {
-      texto = "Erro de conexão. Verifique sua internet.";
-    } else if (erro.code === "permission-denied") {
-      texto = "O Firebase não permitiu ler o cadastro. Precisamos conferir as regras.";
-    }
-
-    mostrarMensagem(texto, true);
-
-    if (auth.currentUser) {
-      await signOut(auth);
-    }
-
-  } finally {
-    botao.disabled = false;
-    botao.textContent = "ENTRAR";
-  }
-});
-
-// PAINEL INICIAL
-function mostrarPainel(dados) {
-  document.querySelector(".container").innerHTML = `
-    <section class="login-card">
-      <h2>Bem-vindo, ${escaparHTML(dados.nome || "Administrador")}!</h2>
-      <p>Você entrou no sistema Compras Santa Rita.</p>
-      <p><strong>Perfil:</strong> Administrador</p>
-      <button id="sair">SAIR DO SISTEMA</button>
-    </section>
-  `;
-
-  document.getElementById("sair").addEventListener("click", async () => {
-    await signOut(auth);
-    location.reload();
-  });
 }
 
 // PROTEÇÃO DE TEXTO
@@ -154,18 +53,192 @@ function escaparHTML(texto) {
   })[caractere]);
 }
 
-// VERIFICAR SESSÃO EXISTENTE
-onAuthStateChanged(auth, async (usuario) => {
-  if (!usuario) return;
+// CONFERIR ADMINISTRADOR
+async function verificarAdministrador(usuario) {
+  const referencia = doc(db, "usuarios", usuario.uid);
+  const resultado = await getDoc(referencia);
+
+  if (!resultado.exists()) {
+    throw new Error("Cadastro de usuário não encontrado.");
+  }
+
+  const dados = resultado.data();
+
+  if (dados.perfil !== "admin" || dados.ativo !== true) {
+    throw new Error("Este usuário não tem acesso de administrador.");
+  }
+
+  return dados;
+}
+
+// ABRIR PAINEL
+function mostrarPainel(dados) {
+  container.innerHTML = `
+    <section class="painel">
+
+      <div class="painel-topo">
+        <div>
+          <h2>Olá, ${escaparHTML(dados.nome || "Administrador")}!</h2>
+          <p>Bem-vindo ao sistema de compras.</p>
+        </div>
+
+        <button id="sair" class="botao-sair">
+          SAIR
+        </button>
+      </div>
+
+      <div class="painel-titulo">
+        <h2>Painel administrativo</h2>
+        <p>Controle de compras do Supermercado Santa Rita.</p>
+      </div>
+
+      <div class="menu-painel">
+
+        <button class="menu-card" data-tela="produtos">
+          <span class="menu-icone">📦</span>
+          <strong>Produtos</strong>
+          <small>Cadastro de mercadorias</small>
+        </button>
+
+        <button class="menu-card" data-tela="fornecedores">
+          <span class="menu-icone">🏢</span>
+          <strong>Fornecedores</strong>
+          <small>Cadastro de fornecedores</small>
+        </button>
+
+        <button class="menu-card" data-tela="cotacoes">
+          <span class="menu-icone">📝</span>
+          <strong>Cotações</strong>
+          <small>Criar e acompanhar cotações</small>
+        </button>
+
+        <button class="menu-card" data-tela="respostas">
+          <span class="menu-icone">💰</span>
+          <strong>Respostas</strong>
+          <small>Comparar preços recebidos</small>
+        </button>
+
+        <button class="menu-card" data-tela="usuarios">
+          <span class="menu-icone">👥</span>
+          <strong>Usuários</strong>
+          <small>Gerenciar acessos</small>
+        </button>
+
+      </div>
+
+      <div id="conteudo-modulo"></div>
+
+    </section>
+  `;
+
+  // ABRIR MENUS
+  document.querySelectorAll(".menu-card").forEach(botao => {
+    botao.addEventListener("click", () => {
+      abrirModulo(botao.dataset.tela);
+    });
+  });
+
+  // SAIR DO SISTEMA
+  document.getElementById("sair").addEventListener("click", async () => {
+    await signOut(auth);
+  });
+}
+
+// ABRIR CADA MÓDULO
+function abrirModulo(tela) {
+  const modulos = {
+    produtos: {
+      titulo: "Produtos",
+      descricao: "Aqui ficará o cadastro e a consulta das mercadorias."
+    },
+    fornecedores: {
+      titulo: "Fornecedores",
+      descricao: "Aqui ficará o cadastro e o gerenciamento dos fornecedores."
+    },
+    cotacoes: {
+      titulo: "Cotações",
+      descricao: "Aqui você poderá criar e acompanhar as cotações."
+    },
+    respostas: {
+      titulo: "Respostas dos fornecedores",
+      descricao: "Aqui serão comparados os preços enviados pelos fornecedores."
+    },
+    usuarios: {
+      titulo: "Usuários",
+      descricao: "Aqui você poderá aprovar e gerenciar os acessos dos vendedores."
+    }
+  };
+
+  const modulo = modulos[tela];
+  if (!modulo) return;
+
+  document.getElementById("conteudo-modulo").innerHTML = `
+    <div class="modulo-aberto">
+      <h2>${modulo.titulo}</h2>
+      <p>${modulo.descricao}</p>
+      <p class="aviso-modulo">
+        Este módulo será desenvolvido na próxima etapa.
+      </p>
+      <button id="voltar-painel">VOLTAR AO PAINEL</button>
+    </div>
+  `;
+
+  document.getElementById("voltar-painel").addEventListener("click", () => {
+    document.getElementById("conteudo-modulo").innerHTML = "";
+  });
+}
+
+// LOGIN
+if (formulario) {
+  formulario.addEventListener("submit", async evento => {
+    evento.preventDefault();
+
+    const email = document.getElementById("email").value.trim();
+    const senha = document.getElementById("senha").value;
+    const botao = formulario.querySelector("button");
+
+    mostrarMensagem("Verificando acesso...");
+
+    botao.disabled = true;
+    botao.textContent = "AGUARDE...";
+
+    try {
+      await signInWithEmailAndPassword(auth, email, senha);
+    } catch (erro) {
+      console.error("Erro no login:", erro);
+
+      let texto = "Não foi possível entrar no sistema.";
+
+      if (
+        erro.code === "auth/invalid-credential" ||
+        erro.code === "auth/wrong-password" ||
+        erro.code === "auth/user-not-found"
+      ) {
+        texto = "E-mail ou senha incorretos.";
+      } else if (erro.code === "auth/network-request-failed") {
+        texto = "Erro de conexão. Verifique sua internet.";
+      }
+
+      mostrarMensagem(texto, true);
+      botao.disabled = false;
+      botao.textContent = "ENTRAR";
+    }
+  });
+}
+
+// VERIFICAR SESSÃO
+onAuthStateChanged(auth, async usuario => {
+  if (!usuario) {
+    location.reload();
+    return;
+  }
 
   try {
     const dados = await verificarAdministrador(usuario);
     mostrarPainel(dados);
   } catch (erro) {
-    console.error("ERRO AO RESTAURAR SESSÃO:", erro);
-
-    if (auth.currentUser) {
-      await signOut(auth);
-    }
+    console.error("Erro ao verificar acesso:", erro);
+    alert(erro.message);
+    await signOut(auth);
   }
 });
