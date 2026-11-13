@@ -14,7 +14,6 @@ import {
   getDoc
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
-// FIREBASE
 const firebaseConfig = {
   apiKey: "AIzaSyBX9Yj8qGBvT_5N4dIcmyxNbeonuEcPzDw",
   authDomain: "compras-santa-rita.firebaseapp.com",
@@ -28,21 +27,17 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// ELEMENTOS
 const formulario = document.getElementById("login-form");
 const container = document.querySelector(".container");
 
-// MENSAGEM DO LOGIN
 function mostrarMensagem(texto, erro = false) {
   const mensagem = document.getElementById("mensagem");
-
   if (!mensagem) return;
 
   mensagem.textContent = texto;
   mensagem.style.color = erro ? "#c62828" : "#267326";
 }
 
-// PROTEÇÃO DE TEXTO
 function escaparHTML(texto) {
   return String(texto).replace(/[&<>"']/g, caractere => ({
     "&": "&amp;",
@@ -53,7 +48,6 @@ function escaparHTML(texto) {
   })[caractere]);
 }
 
-// CONFERIR ADMINISTRADOR
 async function verificarAdministrador(usuario) {
   const referencia = doc(db, "usuarios", usuario.uid);
   const resultado = await getDoc(referencia);
@@ -71,7 +65,6 @@ async function verificarAdministrador(usuario) {
   return dados;
 }
 
-// ABRIR PAINEL
 function mostrarPainel(dados) {
   container.innerHTML = `
     <section class="painel">
@@ -81,10 +74,7 @@ function mostrarPainel(dados) {
           <h2>Olá, ${escaparHTML(dados.nome || "Administrador")}!</h2>
           <p>Bem-vindo ao sistema de compras.</p>
         </div>
-
-        <button id="sair" class="botao-sair">
-          SAIR
-        </button>
+        <button id="sair" class="botao-sair">SAIR</button>
       </div>
 
       <div class="painel-titulo">
@@ -127,45 +117,41 @@ function mostrarPainel(dados) {
       </div>
 
       <div id="conteudo-modulo"></div>
-
     </section>
   `;
 
-  // ABRIR MENUS
   document.querySelectorAll(".menu-card").forEach(botao => {
     botao.addEventListener("click", () => {
       abrirModulo(botao.dataset.tela);
     });
   });
 
-  // SAIR DO SISTEMA
   document.getElementById("sair").addEventListener("click", async () => {
     await signOut(auth);
   });
 }
 
-// ABRIR CADA MÓDULO
 function abrirModulo(tela) {
   const modulos = {
     produtos: {
       titulo: "Produtos",
-      descricao: "Aqui ficará o cadastro e a consulta das mercadorias."
+      descricao: "Cadastro e consulta de mercadorias."
     },
     fornecedores: {
       titulo: "Fornecedores",
-      descricao: "Aqui ficará o cadastro e o gerenciamento dos fornecedores."
+      descricao: "Cadastro e gerenciamento dos fornecedores."
     },
     cotacoes: {
       titulo: "Cotações",
-      descricao: "Aqui você poderá criar e acompanhar as cotações."
+      descricao: "Criação e acompanhamento das cotações."
     },
     respostas: {
       titulo: "Respostas dos fornecedores",
-      descricao: "Aqui serão comparados os preços enviados pelos fornecedores."
+      descricao: "Comparação dos preços enviados pelos fornecedores."
     },
     usuarios: {
       titulo: "Usuários",
-      descricao: "Aqui você poderá aprovar e gerenciar os acessos dos vendedores."
+      descricao: "Aprovação e gerenciamento dos acessos."
     }
   };
 
@@ -209,11 +195,7 @@ if (formulario) {
 
       let texto = "Não foi possível entrar no sistema.";
 
-      if (
-        erro.code === "auth/invalid-credential" ||
-        erro.code === "auth/wrong-password" ||
-        erro.code === "auth/user-not-found"
-      ) {
+      if (erro.code === "auth/invalid-credential") {
         texto = "E-mail ou senha incorretos.";
       } else if (erro.code === "auth/network-request-failed") {
         texto = "Erro de conexão. Verifique sua internet.";
@@ -226,16 +208,16 @@ if (formulario) {
   });
 }
 
-// VERIFICAR SESSÃO
+// ACOMPANHAR SESSÃO
 onAuthStateChanged(auth, async usuario => {
-  if (!usuario) {
-    location.reload();
-    return;
-  }
+
+  // Sem usuário conectado: mantém a tela de login.
+  if (!usuario) return;
 
   try {
     const dados = await verificarAdministrador(usuario);
     mostrarPainel(dados);
+
   } catch (erro) {
     console.error("Erro ao verificar acesso:", erro);
     alert(erro.message);
