@@ -1,4 +1,3 @@
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-app.js";
 
 import {
@@ -20,7 +19,8 @@ import {
   updateDoc,
   query,
   where,
-  serverTimestamp
+  serverTimestamp,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 // FIREBASE
@@ -54,6 +54,9 @@ let temProximaPagina = false;
 
 let controleSessao = 0;
 let cadastroEmAndamento = false;
+
+// Foto opcional do produto (armazenada comprimida no próprio documento).
+let fotoProdutoAtual = "";
 
 // FUNÇÕES GERAIS
 
@@ -293,8 +296,7 @@ function mostrarTelaLogin() {
     });
 
   // CADASTRO DO VENDEDOR
-
-  document.getElementById("cadastro-form")
+    document.getElementById("cadastro-form")
     .addEventListener("submit", async evento => {
       evento.preventDefault();
 
@@ -574,15 +576,10 @@ async function cadastrarEmpresa(evento, uid) {
   evento.preventDefault();
 
   const nome = document.getElementById("nome-empresa").value.trim();
-
   const botao = document.getElementById("botao-salvar-empresa");
 
   if (!nome) {
-    mensagemNaTela(
-      "mensagem-empresa",
-      "Digite o nome da empresa.",
-      true
-    );
+    mensagemNaTela("mensagem-empresa", "Digite o nome da empresa.", true);
     return;
   }
 
@@ -590,52 +587,48 @@ async function cadastrarEmpresa(evento, uid) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // Criar empresa vinculada ao vendedor.
-
-    const empresa = await addDoc(collection(db, "fornecedores"), {
-      empresa: nome,
-      responsavelUid: uid,
-      ativo: true,
-      criadoEm: serverTimestamp()
-    });
-
-    // Buscar todas as cotações que estão abertas.
-
+    // Buscar primeiro todas as cotações que ainda estão abertas.
     const consultaCotacoes = query(
       collection(db, "cotacoes"),
       where("status", "==", "aberta")
     );
 
     const resultadoCotacoes = await getDocs(consultaCotacoes);
-
-    // Criar um vínculo para cada cotação aberta.
-
-    for (const cotacao of resultadoCotacoes.docs) {
-      const vinculoId = cotacao.id + "__" + empresa.id;
-
-      const referenciaVinculo = doc(
-        db,
-        "cotacao_fornecedores",
-        vinculoId
-      );
-
-      const vinculoExistente = await getDoc(referenciaVinculo);
-
-      if (!vinculoExistente.exists()) {
-        await setDoc(referenciaVinculo, {
-          cotacaoId: cotacao.id,
-          fornecedorId: empresa.id,
-          responsavelUid: uid,
-          status: "convidado",
-          criadoEm: serverTimestamp()
-        });
-      }
+    const cotacoesAbertas = resultadoCotacoes.docs;
+      // Uma gravação da empresa + uma para cada vínculo. Limite do lote: 500.
+    if (cotacoesAbertas.length > 499) {
+      throw new Error("LIMITE_COTACOES");
     }
 
-    document.getElementById("form-empresa").reset();
+    // Criar ID da empresa e preparar todas as gravações em um único lote.
+    const empresaRef = doc(collection(db, "fornecedores"));
+    const lote = writeBatch(db);
 
-    document.getElementById("area-cadastro-empresa")
-      .style.display = "none";
+    lote.set(empresaRef, {
+      empresa: nome,
+      responsavelUid: uid,
+      ativo: true,
+      criadoEm: serverTimestamp()
+    });
+
+    cotacoesAbertas.forEach(cotacao => {
+      const vinculoId = cotacao.id + "__" + empresaRef.id;
+      const vinculoRef = doc(db, "cotacao_fornecedores", vinculoId);
+
+      lote.set(vinculoRef, {
+        cotacaoId: cotacao.id,
+        fornecedorId: empresaRef.id,
+        responsavelUid: uid,
+        status: "convidado",
+        criadoEm: serverTimestamp()
+      });
+    });
+
+    // Empresa e vínculos são confirmados juntos ou não são gravados.
+    await lote.commit();
+
+    document.getElementById("form-empresa").reset();
+    document.getElementById("area-cadastro-empresa").style.display = "none";
 
     mensagemNaTela(
       "mensagem-empresa",
@@ -647,15 +640,21 @@ async function cadastrarEmpresa(evento, uid) {
   } catch (erro) {
     console.error("Erro ao cadastrar empresa:", erro);
 
-    mensagemNaTela(
-      "mensagem-empresa",
-      "Não foi possível cadastrar a empresa. Verifique as regras do Firebase.",
-      true
-    );
+    let mensagem = "Não foi possível cadastrar a empresa. Verifique as regras do Firebase.";
+
+    if (erro.message === "LIMITE_COTACOES") {
+      mensagem = "Há muitas cotações abertas para cadastrar a empresa de uma só vez.";
+    } else if (erro.code === "permission-denied") {
+      mensagem = "O Firebase não autorizou a operação. As regras precisam permitir o cadastro em lote.";
+    }
+
+    mensagemNaTela("mensagem-empresa", mensagem, true);
 
   } finally {
-    botao.disabled = false;
-    botao.textContent = "SALVAR EMPRESA";
+    if (botao) {
+      botao.disabled = false;
+      botao.textContent = "SALVAR EMPRESA";
+    }
   }
 }
 
@@ -792,6 +791,34 @@ async function abrirModulo(tela) {
               <option value="DZ">Dúzia (DZ)</option>
             </select>
 
+            <label for="produto-foto">Foto de identificação (opcional)</label>
+
+            <input
+              id="produto-foto"
+              type="file"
+              accept="image/*"
+              capture="environment"
+            >
+
+            <small style="display:block;margin:6px 0 10px;color:#666">
+              Você pode tirar uma foto ou escolher uma imagem da galeria.
+              A imagem será reduzida automaticamente.
+            </small>
+
+            <div id="produto-foto-preview-area" style="margin:10px 0">
+              <img
+                id="produto-foto-preview"
+                alt="Prévia da foto do produto"
+                style="display:none;width:110px;height:110px;object-fit:contain;border:1px solid #ddd;border-radius:8px;background:#fff"
+              >
+              <p id="produto-foto-sem-imagem" style="color:#777;margin:5px 0">
+                Nenhuma foto selecionada.
+              </p>
+              <button type="button" id="remover-foto-produto" style="display:none">
+                REMOVER FOTO
+              </button>
+            </div>
+
             <label class="produto-status">
               <input id="produto-ativo" type="checkbox" checked>
               Produto ativo
@@ -867,6 +894,11 @@ async function abrirModulo(tela) {
 
     document.getElementById("form-produto")
       .addEventListener("submit", salvarProduto);
+        document.getElementById("produto-foto")
+      .addEventListener("change", selecionarFotoProduto);
+
+    document.getElementById("remover-foto-produto")
+      .addEventListener("click", removerFotoProduto);
 
     document.getElementById("cancelar-edicao")
       .addEventListener("click", limparFormularioProduto);
@@ -1074,9 +1106,22 @@ function renderizarProdutos() {
     return `
       <div class="aviso-modulo produto-linha">
 
-        <div class="produto-cabecalho">
+        <div class="produto-cabecalho" style="display:flex;align-items:center;gap:10px">
 
-          <strong>${escaparHTML(produto.nome)}</strong>
+          ${produto.foto ? `
+            <img
+              src="${produto.foto}"
+              alt=""
+              loading="lazy"
+              style="width:48px;height:48px;object-fit:contain;border:1px solid #ddd;border-radius:6px;background:#fff;flex-shrink:0"
+            >
+          ` : `
+            <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;border:1px dashed #ccc;border-radius:6px;color:#999;flex-shrink:0">
+              📦
+            </div>
+          `}
+
+          <strong style="flex:1">${escaparHTML(produto.nome)}</strong>
 
           <span
             class="produto-situacao"
@@ -1147,6 +1192,122 @@ function paginaAnterior() {
   renderizarProdutos();
 }
 
+// FOTO DO PRODUTO: COMPRESSÃO E PRÉ-VISUALIZAÇÃO
+function atualizarPreviaFotoProduto() {
+  const imagem = document.getElementById("produto-foto-preview");
+  const semImagem = document.getElementById("produto-foto-sem-imagem");
+  const botaoRemover = document.getElementById("remover-foto-produto");
+
+  if (!imagem || !semImagem || !botaoRemover) return;
+
+  if (fotoProdutoAtual) {
+    imagem.src = fotoProdutoAtual;
+    imagem.style.display = "block";
+    semImagem.style.display = "none";
+    botaoRemover.style.display = "inline-block";
+  } else {
+    imagem.removeAttribute("src");
+    imagem.style.display = "none";
+    semImagem.style.display = "block";
+    botaoRemover.style.display = "none";
+  }
+}
+
+function comprimirImagemProduto(arquivo) {
+  return new Promise((resolve, reject) => {
+    if (!arquivo || !arquivo.type.startsWith("image/")) {
+      reject(new Error("Selecione um arquivo de imagem válido."));
+      return;
+    }
+
+    if (arquivo.size > 12 * 1024 * 1024) {
+      reject(new Error("A foto original deve ter no máximo 12 MB."));
+      return;
+    }
+
+    const leitor = new FileReader();
+
+    leitor.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+
+    leitor.onload = () => {
+      const imagem = new Image();
+
+      imagem.onerror = () => reject(new Error("A imagem selecionada não pôde ser aberta."));
+
+      imagem.onload = () => {
+        const limiteLado = 320;
+        const proporcao = Math.min(
+          1,
+          limiteLado / Math.max(imagem.width, imagem.height)
+        );
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(imagem.width * proporcao));
+        canvas.height = Math.max(1, Math.round(imagem.height * proporcao));
+
+        const contexto = canvas.getContext("2d");
+
+        if (!contexto) {
+          reject(new Error("Não foi possível preparar a imagem."));
+          return;
+        }
+
+        contexto.fillStyle = "#ffffff";
+        contexto.fillRect(0, 0, canvas.width, canvas.height);
+        contexto.drawImage(imagem, 0, 0, canvas.width, canvas.height);
+
+        // Mantém a imagem em torno de 100 KB para não sobrecarregar o documento.
+        let qualidade = 0.78;
+        let resultado = canvas.toDataURL("image/jpeg", qualidade);
+
+        while (resultado.length > 140000 && qualidade > 0.35) {
+          qualidade -= 0.08;
+          resultado = canvas.toDataURL("image/jpeg", qualidade);
+        }
+
+        if (resultado.length > 180000) {
+          reject(new Error("Não foi possível reduzir a foto o suficiente. Escolha outra imagem."));
+          return;
+        }
+
+        resolve(resultado);
+      };
+
+      imagem.src = leitor.result;
+    };
+
+    leitor.readAsDataURL(arquivo);
+  });
+}
+
+async function selecionarFotoProduto(evento) {
+  const arquivo = evento.target.files?.[0];
+
+  if (!arquivo) return;
+
+  mostrarMensagemProduto("Preparando foto...");
+
+  try {
+    fotoProdutoAtual = await comprimirImagemProduto(arquivo);
+    atualizarPreviaFotoProduto();
+    mostrarMensagemProduto("Foto pronta! Ela será salva junto com o produto.");
+  } catch (erro) {
+    console.error("Erro ao preparar foto:", erro);
+    evento.target.value = "";
+    mostrarMensagemProduto(erro.message || "Não foi possível preparar a foto.", true);
+  }
+}
+
+function removerFotoProduto() {
+  fotoProdutoAtual = "";
+
+  const campo = document.getElementById("produto-foto");
+  if (campo) campo.value = "";
+
+  atualizarPreviaFotoProduto();
+  mostrarMensagemProduto("A foto será removida quando você salvar o produto.");
+}
+
 // EDITAR PRODUTO
 
 function editarProduto(id) {
@@ -1180,6 +1341,11 @@ function editarProduto(id) {
   document.getElementById("produto-ativo").checked =
     produto.ativo === true;
 
+  fotoProdutoAtual = produto.foto || "";
+  atualizarPreviaFotoProduto();
+
+  document.getElementById("produto-foto").value = "";
+
   document.getElementById("botao-salvar-produto")
     .textContent = "ATUALIZAR PRODUTO";
 
@@ -1195,6 +1361,9 @@ function limparFormularioProduto() {
   produtoEditandoId = null;
 
   document.getElementById("form-produto").reset();
+
+  fotoProdutoAtual = "";
+  atualizarPreviaFotoProduto();
 
   document.getElementById("produto-ativo").checked = true;
 
@@ -1230,7 +1399,9 @@ async function salvarProduto(evento) {
 
     unidade: document.getElementById("produto-unidade").value,
 
-    ativo: document.getElementById("produto-ativo").checked
+    ativo: document.getElementById("produto-ativo").checked,
+
+    foto: fotoProdutoAtual || ""
   };
 
   if (
@@ -1292,7 +1463,6 @@ async function salvarProduto(evento) {
       : "SALVAR PRODUTO";
   }
 }
-
 // ATIVAR OU DESATIVAR PRODUTO
 
 async function alterarStatusProduto(id) {
