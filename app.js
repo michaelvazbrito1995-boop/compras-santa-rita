@@ -418,8 +418,7 @@ function mostrarPainel(dados) {
         <h2>Painel administrativo</h2>
         <p>Controle de compras do Supermercado Santa Rita.</p>
       </div>
-
-      <div class="menu-painel">
+            <div class="menu-painel">
 
         <button class="menu-card" data-tela="produtos">
           <span class="menu-icone">📦</span>
@@ -810,7 +809,7 @@ async function abrirModulo(tela) {
                 id="produto-foto-preview"
                 alt="Prévia da foto do produto"
                 style="display:none;width:110px;height:110px;object-fit:contain;border:1px solid #ddd;border-radius:8px;background:#fff"
-              >
+                              >
               <p id="produto-foto-sem-imagem" style="color:#777;margin:5px 0">
                 Nenhuma foto selecionada.
               </p>
@@ -933,12 +932,37 @@ async function abrirModulo(tela) {
     return;
   }
 
-  const modulos = {
-    fornecedores: {
-      titulo: "Fornecedores",
-      descricao: "Cadastro e gerenciamento dos fornecedores."
-    },
+  // MÓDULO DE FORNECEDORES: LISTAR E ALTERAR STATUS DAS EMPRESAS
 
+  if (tela === "fornecedores") {
+    conteudo.innerHTML = `
+      <div class="modulo-aberto">
+
+        <h2>🏢 Fornecedores</h2>
+
+        <p>Consulte as empresas cadastradas pelos vendedores e controle o acesso de cada uma.</p>
+
+        <div id="lista-fornecedores-admin">
+          Carregando empresas...
+        </div>
+
+        <button type="button" id="voltar-painel">
+          VOLTAR AO PAINEL
+        </button>
+
+      </div>
+    `;
+
+    document.getElementById("voltar-painel")
+      .addEventListener("click", () => {
+        conteudo.innerHTML = "";
+      });
+
+    await carregarFornecedoresAdmin();
+    return;
+  }
+
+  const modulos = {
     cotacoes: {
       titulo: "Cotações",
       descricao: "Criação e acompanhamento das cotações."
@@ -981,6 +1005,125 @@ async function abrirModulo(tela) {
     .addEventListener("click", () => {
       conteudo.innerHTML = "";
     });
+}
+
+// CARREGAR EMPRESAS NO PAINEL DO ADMINISTRADOR
+
+async function carregarFornecedoresAdmin() {
+  const lista = document.getElementById("lista-fornecedores-admin");
+
+  if (!lista) return;
+
+  lista.textContent = "Carregando empresas...";
+
+  try {
+    const resultado = await getDocs(collection(db, "fornecedores"));
+
+    if (resultado.empty) {
+      lista.innerHTML = `
+        <div class="aviso-modulo">
+          Nenhuma empresa cadastrada até o momento.
+        </div>
+      `;
+      return;
+    }
+
+    const empresas = resultado.docs.map(documento => ({
+      id: documento.id,
+      ...documento.data()
+    }));
+
+    empresas.sort((a, b) =>
+      String(a.empresa || a.nome || "").localeCompare(
+        String(b.empresa || b.nome || ""),
+        "pt-BR"
+      )
+    );
+
+    lista.innerHTML = empresas.map(empresa => {
+      const ativa = empresa.ativo === true;
+      const nome = empresa.empresa || empresa.nome || "Empresa sem nome";
+
+      let dataCadastro = "";
+
+      if (empresa.criadoEm && typeof empresa.criadoEm.toDate === "function") {
+        dataCadastro = empresa.criadoEm.toDate().toLocaleDateString("pt-BR");
+      }
+
+      return `
+        <div class="aviso-modulo" style="margin:12px 0">
+          <strong>${escaparHTML(nome)}</strong>
+
+          <p>
+            Situação:
+            <span style="color:${ativa ? "#267326" : "#c62828"};font-weight:bold">
+              ${ativa ? "Ativa" : "Bloqueada"}
+            </span>
+          </p>
+
+          ${dataCadastro ? `<p>Cadastro: ${dataCadastro}</p>` : ""}
+
+          <button
+            type="button"
+            data-status-fornecedor="${escaparHTML(empresa.id)}"
+          >
+            ${ativa ? "BLOQUEAR EMPRESA" : "ATIVAR EMPRESA"}
+          </button>
+        </div>
+      `;
+    }).join("");
+
+    lista.querySelectorAll("[data-status-fornecedor]").forEach(botao => {
+      botao.addEventListener("click", () => {
+        alterarStatusFornecedorAdmin(botao.dataset.statusFornecedor);
+      });
+    });
+
+  } catch (erro) {
+    console.error("Erro ao carregar empresas no administrador:", erro);
+
+    lista.innerHTML = `
+      <div class="aviso-modulo" style="color:#c62828">
+        Não foi possível carregar as empresas. Verifique sua conexão e as regras do Firebase.
+      </div>
+    `;
+  }
+}
+
+// ATIVAR OU BLOQUEAR UMA EMPRESA (SOMENTE ADMINISTRADOR)
+
+async function alterarStatusFornecedorAdmin(id) {
+  try {
+    const referencia = doc(db, "fornecedores", id);
+    const resultado = await getDoc(referencia);
+
+    if (!resultado.exists()) {
+      alert("Esta empresa não foi encontrada.");
+      return;
+    }
+
+    const empresa = resultado.data();
+    const novoStatus = empresa.ativo !== true;
+    const nome = empresa.empresa || empresa.nome || "esta empresa";
+
+    const confirmacao = confirm(
+      novoStatus
+        ? `Deseja ativar "${nome}"?`
+        : `Deseja bloquear "${nome}"?`
+    );
+
+    if (!confirmacao) return;
+
+    await updateDoc(referencia, {
+      ativo: novoStatus
+    });
+
+    await carregarFornecedoresAdmin();
+
+  } catch (erro) {
+    console.error("Erro ao alterar situação da empresa:", erro);
+    alert("Não foi possível alterar a situação da empresa. Tente novamente.");
+  }
 }
 
 // MENSAGEM DOS PRODUTOS
@@ -1114,7 +1257,7 @@ function renderizarProdutos() {
               alt=""
               loading="lazy"
               style="width:48px;height:48px;object-fit:contain;border:1px solid #ddd;border-radius:6px;background:#fff;flex-shrink:0"
-            >
+                          >
           ` : `
             <div style="width:48px;height:48px;display:flex;align-items:center;justify-content:center;border:1px dashed #ccc;border-radius:6px;color:#999;flex-shrink:0">
               📦
