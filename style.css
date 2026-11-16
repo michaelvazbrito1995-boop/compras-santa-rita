@@ -436,3 +436,79 @@ footer span {
   padding: 7px 9px !important;
   margin-top: 6px;
 }
+
+
+/* MÓDULOS COMPLETOS: COTAÇÕES, FORNECEDORES E USUÁRIOS */
+#conteudo-modulo textarea,
+#conteudo-modulo select,
+#form-resposta-fornecedor textarea,
+#form-resposta-fornecedor input,
+#form-cotacao input,
+#form-cotacao textarea {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+#conteudo-modulo textarea:focus,
+#conteudo-modulo select:focus,
+#form-resposta-fornecedor input:focus,
+#form-resposta-fornecedor textarea:focus {
+  outline: none;
+  border-color: #e3b500;
+}
+
+.selecao-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  margin: 7px 0;
+  background: #fffdf3;
+  border: 1px solid #eee2a7;
+  border-radius: 8px;
+  font-weight: normal;
+}
+
+.selecao-item input {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  accent-color: #d6a900;
+}
+
+#cotacao-produtos,
+#cotacao-fornecedores {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+#form-resposta-fornecedor {
+  padding: 16px;
+  background: #fffdf3;
+  border: 1px solid #eee2a7;
+  border-radius: 10px;
+}
+
+#form-resposta-fornecedor label {
+  margin-top: 10px;
+}
+
+@media (max-width: 480px) {
+  #conteudo-modulo .modulo-aberto {
+    padding: 17px 13px;
+  }
+
+  #conteudo-modulo button,
+  #form-resposta-fornecedor button {
+    max-width: 100%;
+    font-size: 13px;
+  }
+}

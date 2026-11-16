@@ -537,6 +537,12 @@ function mostrarPainelFornecedor(dados, uid) {
           Carregando empresas...
         </div>
 
+        <hr style="margin:25px 0">
+        <h3>📝 Cotações recebidas</h3>
+        <p>Consulte as solicitações e envie seus preços.</p>
+        <div id="lista-cotacoes-fornecedor">Carregando cotações...</div>
+        <div id="form-resposta-fornecedor" style="display:none;margin-top:18px"></div>
+
       </div>
 
     </section>
@@ -567,6 +573,7 @@ function mostrarPainelFornecedor(dados, uid) {
     });
 
   carregarEmpresas(uid);
+  carregarCotacoesFornecedor(uid);
 }
 
 // CADASTRAR EMPRESA
@@ -962,49 +969,21 @@ async function abrirModulo(tela) {
     return;
   }
 
-  const modulos = {
-    cotacoes: {
-      titulo: "Cotações",
-      descricao: "Criação e acompanhamento das cotações."
-    },
+  if (tela === "cotacoes") {
+    await abrirModuloCotacoes(conteudo);
+    return;
+  }
 
-    respostas: {
-      titulo: "Respostas dos fornecedores",
-      descricao: "Comparação dos preços enviados pelos fornecedores."
-    },
+  if (tela === "respostas") {
+    await abrirModuloRespostas(conteudo);
+    return;
+  }
 
-    usuarios: {
-      titulo: "Usuários",
-      descricao: "Gerenciamento dos acessos."
-    }
-  };
+  if (tela === "usuarios") {
+    await abrirModuloUsuarios(conteudo);
+    return;
+  }
 
-  const modulo = modulos[tela];
-
-  if (!modulo) return;
-
-  conteudo.innerHTML = `
-    <div class="modulo-aberto">
-
-      <h2>${modulo.titulo}</h2>
-
-      <p>${modulo.descricao}</p>
-
-      <p class="aviso-modulo">
-        Este módulo será desenvolvido na próxima etapa.
-      </p>
-
-      <button id="voltar-painel">
-        VOLTAR AO PAINEL
-      </button>
-
-    </div>
-  `;
-
-  document.getElementById("voltar-painel")
-    .addEventListener("click", () => {
-      conteudo.innerHTML = "";
-    });
 }
 
 // CARREGAR EMPRESAS NO PAINEL DO ADMINISTRADOR
@@ -1052,7 +1031,10 @@ async function carregarFornecedoresAdmin() {
 
       return `
         <div class="aviso-modulo" style="margin:12px 0">
-          <strong>${escaparHTML(nome)}</strong>
+          <button type="button" class="nome-fornecedor" data-detalhes-fornecedor="${escaparHTML(empresa.id)}"
+            style="padding:0;border:0;background:transparent;color:#292929;text-align:left;font-size:17px;font-weight:bold">
+            ${escaparHTML(nome)}
+          </button>
 
           <p>
             Situação:
@@ -1076,6 +1058,12 @@ async function carregarFornecedoresAdmin() {
     lista.querySelectorAll("[data-status-fornecedor]").forEach(botao => {
       botao.addEventListener("click", () => {
         alterarStatusFornecedorAdmin(botao.dataset.statusFornecedor);
+      });
+    });
+
+    lista.querySelectorAll("[data-detalhes-fornecedor]").forEach(botao => {
+      botao.addEventListener("click", () => {
+        mostrarDetalhesFornecedor(botao.dataset.detalhesFornecedor);
       });
     });
 
@@ -1123,6 +1111,464 @@ async function alterarStatusFornecedorAdmin(id) {
   } catch (erro) {
     console.error("Erro ao alterar situação da empresa:", erro);
     alert("Não foi possível alterar a situação da empresa. Tente novamente.");
+  }
+}
+
+
+// DETALHES DO VENDEDOR RESPONSÁVEL PELA EMPRESA
+
+async function mostrarDetalhesFornecedor(empresaId) {
+  try {
+    const empresaSnap = await getDoc(doc(db, "fornecedores", empresaId));
+    if (!empresaSnap.exists()) {
+      alert("Empresa não encontrada.");
+      return;
+    }
+
+    const empresa = empresaSnap.data();
+    const uid = empresa.responsavelUid;
+    let vendedor = {};
+
+    if (uid) {
+      const usuarioSnap = await getDoc(doc(db, "usuarios", uid));
+      if (usuarioSnap.exists()) vendedor = usuarioSnap.data();
+    }
+
+    const nomeEmpresa = empresa.empresa || empresa.nome || "Empresa";
+    const conteudo = document.getElementById("lista-fornecedores-admin");
+    if (!conteudo) return;
+
+    let painel = document.getElementById("detalhes-vendedor-fornecedor");
+    if (!painel) {
+      painel = document.createElement("div");
+      painel.id = "detalhes-vendedor-fornecedor";
+      painel.className = "aviso-modulo";
+      painel.style.margin = "16px 0";
+      conteudo.prepend(painel);
+    }
+
+    painel.innerHTML = `
+      <h3>Contato do fornecedor</h3>
+      <p><strong>Empresa:</strong> ${escaparHTML(nomeEmpresa)}</p>
+      <p><strong>Vendedor responsável:</strong> ${escaparHTML(vendedor.nome || "Não informado")}</p>
+      <p><strong>Telefone / WhatsApp:</strong> ${escaparHTML(vendedor.telefone || "Não informado")}</p>
+      <p><strong>E-mail:</strong> ${escaparHTML(vendedor.email || "Não informado")}</p>
+      <button type="button" id="fechar-detalhes-fornecedor">FECHAR</button>
+    `;
+    document.getElementById("fechar-detalhes-fornecedor")
+      .addEventListener("click", () => painel.remove());
+    painel.scrollIntoView({ behavior: "smooth", block: "center" });
+  } catch (erro) {
+    console.error("Erro ao consultar vendedor:", erro);
+    alert("Não foi possível consultar os dados do vendedor.");
+  }
+}
+
+// MÓDULO DE COTAÇÕES — ADMINISTRADOR
+
+async function abrirModuloCotacoes(conteudo) {
+  conteudo.innerHTML = `
+    <div class="modulo-aberto">
+      <h2>📝 Cotações</h2>
+      <p>Crie cotações, selecione os produtos e convide os fornecedores ativos.</p>
+      <button type="button" id="nova-cotacao">+ NOVA COTAÇÃO</button>
+      <div id="form-cotacao-area" style="display:none">
+        <form id="form-cotacao">
+          <label for="cotacao-titulo">Título da cotação</label>
+          <input id="cotacao-titulo" required placeholder="Ex.: Cotação semanal de mercearia">
+          <label for="cotacao-descricao">Observações</label>
+          <textarea id="cotacao-descricao" rows="3" placeholder="Informações para os fornecedores"></textarea>
+          <label for="cotacao-prazo">Prazo para resposta</label>
+          <input id="cotacao-prazo" type="datetime-local" required>
+          <h3 style="margin-top:18px">Produtos</h3>
+          <div id="cotacao-produtos">Carregando produtos...</div>
+          <h3 style="margin-top:18px">Fornecedores convidados</h3>
+          <div id="cotacao-fornecedores">Carregando fornecedores...</div>
+          <button type="submit" id="salvar-cotacao">CRIAR COTAÇÃO</button>
+          <button type="button" id="cancelar-cotacao">CANCELAR</button>
+          <p id="mensagem-cotacao"></p>
+        </form>
+      </div>
+      <hr style="margin:24px 0">
+      <h3>Cotações cadastradas</h3>
+      <div id="lista-cotacoes-admin">Carregando...</div>
+      <button type="button" id="voltar-painel">VOLTAR AO PAINEL</button>
+    </div>`;
+
+  document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
+  document.getElementById("nova-cotacao").addEventListener("click", async () => {
+    document.getElementById("form-cotacao-area").style.display = "block";
+    await carregarOpcoesCotacao();
+  });
+  document.getElementById("cancelar-cotacao").addEventListener("click", () => {
+    document.getElementById("form-cotacao").reset();
+    document.getElementById("form-cotacao-area").style.display = "none";
+  });
+  document.getElementById("form-cotacao").addEventListener("submit", salvarCotacao);
+  await carregarListaCotacoesAdmin();
+}
+
+async function carregarOpcoesCotacao() {
+  const areaProdutos = document.getElementById("cotacao-produtos");
+  const areaFornecedores = document.getElementById("cotacao-fornecedores");
+  try {
+    const [prodSnap, fornSnap] = await Promise.all([
+      getDocs(collection(db, "produtos")),
+      getDocs(collection(db, "fornecedores"))
+    ]);
+    const produtos = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(p => p.ativo === true)
+      .sort((a,b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    const fornecedores = fornSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(f => f.ativo === true)
+      .sort((a,b) => String(a.empresa || "").localeCompare(String(b.empresa || ""), "pt-BR"));
+
+    areaProdutos.innerHTML = produtos.length ? produtos.map(p => `
+      <label class="selecao-item">
+        <input type="checkbox" name="cotacao-produto" value="${escaparHTML(p.id)}">
+        ${escaparHTML(p.nome)} (${escaparHTML(p.unidade || "UN")})
+      </label>`).join("") : "<p>Nenhum produto ativo cadastrado.</p>";
+
+    areaFornecedores.innerHTML = fornecedores.length ? fornecedores.map(f => `
+      <label class="selecao-item">
+        <input type="checkbox" name="cotacao-fornecedor" value="${escaparHTML(f.id)}">
+        ${escaparHTML(f.empresa || f.nome || "Empresa")}
+      </label>`).join("") : "<p>Nenhum fornecedor ativo cadastrado.</p>";
+  } catch (erro) {
+    console.error(erro);
+    areaProdutos.textContent = "Erro ao carregar produtos.";
+    areaFornecedores.textContent = "Erro ao carregar fornecedores.";
+  }
+}
+
+async function salvarCotacao(evento) {
+  evento.preventDefault();
+  const botao = document.getElementById("salvar-cotacao");
+  const titulo = document.getElementById("cotacao-titulo").value.trim();
+  const descricao = document.getElementById("cotacao-descricao").value.trim();
+  const prazoTexto = document.getElementById("cotacao-prazo").value;
+  const produtoIds = [...document.querySelectorAll('input[name="cotacao-produto"]:checked')].map(x => x.value);
+  const fornecedorIds = [...document.querySelectorAll('input[name="cotacao-fornecedor"]:checked')].map(x => x.value);
+
+  if (!titulo || !prazoTexto || produtoIds.length === 0 || fornecedorIds.length === 0) {
+    mensagemNaTela("mensagem-cotacao", "Informe título, prazo, pelo menos um produto e um fornecedor.", true);
+    return;
+  }
+  const prazo = new Date(prazoTexto);
+  if (Number.isNaN(prazo.getTime()) || prazo <= new Date()) {
+    mensagemNaTela("mensagem-cotacao", "O prazo precisa ser uma data futura.", true);
+    return;
+  }
+
+  botao.disabled = true;
+  botao.textContent = "CRIANDO...";
+  try {
+    const [prodSnap, fornSnap] = await Promise.all([
+      getDocs(collection(db, "produtos")),
+      getDocs(collection(db, "fornecedores"))
+    ]);
+    const produtos = prodSnap.docs.filter(d => produtoIds.includes(d.id)).map(d => ({
+      produtoId: d.id, nome: d.data().nome || "", unidade: d.data().unidade || "UN"
+    }));
+    const fornecedores = fornSnap.docs.filter(d => fornecedorIds.includes(d.id) && d.data().ativo === true);
+    if (fornecedores.length !== fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
+
+    const cotacaoRef = doc(collection(db, "cotacoes"));
+    const lote = writeBatch(db);
+    lote.set(cotacaoRef, {
+      titulo, descricao, prazo: prazo.toISOString(), produtos,
+      status: "aberta", criadoEm: serverTimestamp(),
+      criadoPor: auth.currentUser?.uid || ""
+    });
+    fornecedores.forEach(f => {
+      const dados = f.data();
+      const vinculoRef = doc(db, "cotacao_fornecedores", cotacaoRef.id + "__" + f.id);
+      lote.set(vinculoRef, {
+        cotacaoId: cotacaoRef.id, fornecedorId: f.id,
+        responsavelUid: dados.responsavelUid || "",
+        status: "convidado", criadoEm: serverTimestamp()
+      });
+    });
+    await lote.commit();
+    document.getElementById("form-cotacao").reset();
+    document.getElementById("form-cotacao-area").style.display = "none";
+    mensagemNaTela("mensagem-cotacao", "Cotação criada e enviada aos fornecedores!");
+    await carregarListaCotacoesAdmin();
+  } catch (erro) {
+    console.error("Erro ao criar cotação:", erro);
+    mensagemNaTela("mensagem-cotacao",
+      erro.message === "FORNECEDOR_INATIVO" ? "Um dos fornecedores selecionados está bloqueado." : "Não foi possível criar a cotação. Verifique as regras do Firebase.", true);
+  } finally {
+    botao.disabled = false;
+    botao.textContent = "CRIAR COTAÇÃO";
+  }
+}
+
+async function carregarListaCotacoesAdmin() {
+  const area = document.getElementById("lista-cotacoes-admin");
+  if (!area) return;
+  try {
+    const snap = await getDocs(collection(db, "cotacoes"));
+    const cotacoes = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a,b) => (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0));
+    area.innerHTML = cotacoes.length ? cotacoes.map(c => `
+      <div class="aviso-modulo" style="margin:12px 0">
+        <strong>${escaparHTML(c.titulo || "Cotação")}</strong>
+        <p>Status: <strong>${c.status === "aberta" ? "Aberta" : "Encerrada"}</strong></p>
+        <p>Produtos: ${(c.produtos || []).length}</p>
+        <p>Prazo: ${c.prazo ? new Date(c.prazo).toLocaleString("pt-BR") : "Não informado"}</p>
+        ${c.descricao ? `<p>${escaparHTML(c.descricao)}</p>` : ""}
+        ${c.status === "aberta" ? `<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR COTAÇÃO</button>` : ""}
+      </div>`).join("") : '<div class="aviso-modulo">Nenhuma cotação cadastrada.</div>';
+    area.querySelectorAll("[data-encerrar-cotacao]").forEach(b => b.addEventListener("click", async () => {
+      if (!confirm("Deseja encerrar esta cotação?")) return;
+      try {
+        await updateDoc(doc(db, "cotacoes", b.dataset.encerrarCotacao), { status: "encerrada" });
+        await carregarListaCotacoesAdmin();
+      } catch (e) { console.error(e); alert("Não foi possível encerrar a cotação."); }
+    }));
+  } catch (erro) {
+    console.error(erro);
+    area.textContent = "Não foi possível carregar as cotações.";
+  }
+}
+
+// MÓDULO DE RESPOSTAS — COMPARAÇÃO DE PREÇOS
+
+async function abrirModuloRespostas(conteudo) {
+  conteudo.innerHTML = `
+    <div class="modulo-aberto">
+      <h2>💰 Respostas dos fornecedores</h2>
+      <p>Compare os preços recebidos em cada cotação.</p>
+      <label for="filtro-cotacao-respostas">Selecione a cotação</label>
+      <select id="filtro-cotacao-respostas"><option value="">Todas as cotações</option></select>
+      <div id="lista-respostas-admin">Carregando respostas...</div>
+      <button type="button" id="voltar-painel">VOLTAR AO PAINEL</button>
+    </div>`;
+  document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
+  const select = document.getElementById("filtro-cotacao-respostas");
+  try {
+    const snap = await getDocs(collection(db, "cotacoes"));
+    snap.docs.forEach(d => {
+      const o = document.createElement("option");
+      o.value = d.id; o.textContent = d.data().titulo || "Cotação";
+      select.appendChild(o);
+    });
+    select.addEventListener("change", carregarRespostasAdmin);
+    await carregarRespostasAdmin();
+  } catch (e) {
+    console.error(e);
+    document.getElementById("lista-respostas-admin").textContent = "Não foi possível carregar as cotações.";
+  }
+}
+
+async function carregarRespostasAdmin() {
+  const area = document.getElementById("lista-respostas-admin");
+  if (!area) return;
+  area.textContent = "Carregando respostas...";
+  try {
+    const filtro = document.getElementById("filtro-cotacao-respostas")?.value || "";
+    const snap = await getDocs(collection(db, "respostas"));
+    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => !filtro || r.cotacaoId === filtro);
+    if (!respostas.length) {
+      area.innerHTML = '<div class="aviso-modulo">Ainda não há respostas para esta seleção.</div>';
+      return;
+    }
+    const enriquecidas = await Promise.all(respostas.map(async r => {
+      const [cot, forn] = await Promise.all([
+        getDoc(doc(db, "cotacoes", r.cotacaoId)),
+        getDoc(doc(db, "fornecedores", r.fornecedorId))
+      ]);
+      return { ...r, titulo: cot.exists() ? cot.data().titulo : "Cotação", empresa: forn.exists() ? forn.data().empresa : "Fornecedor" };
+    }));
+    area.innerHTML = enriquecidas.map(r => `
+      <div class="aviso-modulo" style="margin:12px 0">
+        <strong>${escaparHTML(r.titulo)} — ${escaparHTML(r.empresa)}</strong>
+        ${(r.itens || []).map(item => `
+          <div style="border-top:1px solid #e5e5e5;padding:9px 0">
+            <strong>${escaparHTML(item.nome)}</strong>
+            <p>Marca: ${escaparHTML(item.marca || "Não informada")}</p>
+            <p>Preço: ${Number(item.preco || 0).toLocaleString("pt-BR", {style:"currency",currency:"BRL"})}</p>
+            ${item.observacao ? `<p>${escaparHTML(item.observacao)}</p>` : ""}
+          </div>`).join("")}
+        ${r.observacaoGeral ? `<p>Observações: ${escaparHTML(r.observacaoGeral)}</p>` : ""}
+        <p>Enviada: ${r.enviadoEm?.toDate ? r.enviadoEm.toDate().toLocaleString("pt-BR") : "—"}</p>
+      </div>`).join("");
+  } catch (erro) {
+    console.error(erro);
+    area.textContent = "Não foi possível carregar as respostas.";
+  }
+}
+
+// MÓDULO DE USUÁRIOS
+
+async function abrirModuloUsuarios(conteudo) {
+  conteudo.innerHTML = `
+    <div class="modulo-aberto">
+      <h2>👥 Usuários</h2>
+      <p>Consulte vendedores cadastrados e controle o acesso ao sistema.</p>
+      <div id="lista-usuarios-admin">Carregando usuários...</div>
+      <button type="button" id="voltar-painel">VOLTAR AO PAINEL</button>
+    </div>`;
+  document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
+  await carregarUsuariosAdmin();
+}
+
+async function carregarUsuariosAdmin() {
+  const area = document.getElementById("lista-usuarios-admin");
+  if (!area) return;
+  try {
+    const snap = await getDocs(collection(db, "usuarios"));
+    const usuarios = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a,b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+    area.innerHTML = usuarios.length ? usuarios.map(u => `
+      <div class="aviso-modulo" style="margin:12px 0">
+        <strong>${escaparHTML(u.nome || "Sem nome")}</strong>
+        <p>Perfil: ${escaparHTML(u.perfil || "Não informado")}</p>
+        <p>Telefone: ${escaparHTML(u.telefone || "Não informado")}</p>
+        <p>E-mail: ${escaparHTML(u.email || "Não informado")}</p>
+        <p>Status: <strong style="color:${u.ativo === true ? "#267326" : "#c62828"}">${u.ativo === true ? "Ativo" : "Bloqueado"}</strong></p>
+        ${u.perfil !== "admin" && u.id !== auth.currentUser?.uid ? `<button type="button" data-status-usuario="${escaparHTML(u.id)}">${u.ativo === true ? "BLOQUEAR USUÁRIO" : "ATIVAR USUÁRIO"}</button>` : ""}
+      </div>`).join("") : '<div class="aviso-modulo">Nenhum usuário cadastrado.</div>';
+    area.querySelectorAll("[data-status-usuario]").forEach(b => b.addEventListener("click", async () => {
+      const id = b.dataset.statusUsuario;
+      const usuario = usuarios.find(u => u.id === id);
+      const novoAtivo = usuario?.ativo !== true;
+      if (!confirm(`Deseja ${novoAtivo ? "ativar" : "bloquear"} este usuário?`)) return;
+      try {
+        await updateDoc(doc(db, "usuarios", id), { ativo: novoAtivo });
+        await carregarUsuariosAdmin();
+      } catch (e) { console.error(e); alert("Não foi possível alterar o usuário."); }
+    }));
+  } catch (erro) {
+    console.error(erro);
+    area.textContent = "Não foi possível carregar os usuários.";
+  }
+}
+
+// COTAÇÕES RECEBIDAS — ÁREA DO VENDEDOR
+
+async function carregarCotacoesFornecedor(uid) {
+  const area = document.getElementById("lista-cotacoes-fornecedor");
+  if (!area) return;
+  try {
+    const vinculosSnap = await getDocs(query(
+      collection(db, "cotacao_fornecedores"),
+      where("responsavelUid", "==", uid)
+    ));
+    const vinculos = vinculosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (!vinculos.length) {
+      area.innerHTML = '<div class="aviso-modulo">Você ainda não recebeu cotações.</div>';
+      return;
+    }
+    const registros = await Promise.all(vinculos.map(async v => {
+      const [cotSnap, fornSnap] = await Promise.all([
+        getDoc(doc(db, "cotacoes", v.cotacaoId)),
+        getDoc(doc(db, "fornecedores", v.fornecedorId))
+      ]);
+      return { ...v, cotacao: cotSnap.exists() ? { id: cotSnap.id, ...cotSnap.data() } : null,
+        fornecedor: fornSnap.exists() ? fornSnap.data() : null };
+    }));
+    const validos = registros.filter(r => r.cotacao && r.fornecedor?.ativo === true);
+    area.innerHTML = validos.length ? validos.map(r => `
+      <div class="aviso-modulo" style="margin:12px 0">
+        <strong>${escaparHTML(r.cotacao.titulo)}</strong>
+        <p>Empresa: ${escaparHTML(r.fornecedor.empresa || "Empresa")}</p>
+        <p>Status: ${r.cotacao.status === "aberta" ? "Aberta" : "Encerrada"}</p>
+        <p>Prazo: ${r.cotacao.prazo ? new Date(r.cotacao.prazo).toLocaleString("pt-BR") : "—"}</p>
+        ${r.cotacao.status === "aberta" && (!r.cotacao.prazo || new Date(r.cotacao.prazo) > new Date()) ?
+          `<button type="button" data-responder-cotacao="${escaparHTML(r.cotacao.id)}" data-fornecedor-id="${escaparHTML(r.fornecedorId)}">RESPONDER COTAÇÃO</button>` :
+          "<p>Esta cotação não está mais recebendo respostas.</p>"}
+      </div>`).join("") : '<div class="aviso-modulo">Não há cotações abertas para suas empresas.</div>';
+    area.querySelectorAll("[data-responder-cotacao]").forEach(b => b.addEventListener("click", () =>
+      abrirFormularioResposta(b.dataset.responderCotacao, b.dataset.fornecedorId)));
+  } catch (erro) {
+    console.error("Erro ao carregar cotações do fornecedor:", erro);
+    area.textContent = "Não foi possível carregar as cotações.";
+  }
+}
+
+async function abrirFormularioResposta(cotacaoId, fornecedorId) {
+  const area = document.getElementById("form-resposta-fornecedor");
+  if (!area) return;
+  try {
+    const snap = await getDoc(doc(db, "cotacoes", cotacaoId));
+    if (!snap.exists()) throw new Error("Cotação não encontrada.");
+    const cot = snap.data();
+    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) {
+      alert("O prazo desta cotação terminou.");
+      return;
+    }
+    area.style.display = "block";
+    area.dataset.cotacaoId = cotacaoId;
+    area.dataset.fornecedorId = fornecedorId;
+    area.innerHTML = `
+      <h3>Responder: ${escaparHTML(cot.titulo)}</h3>
+      <form id="form-resposta">
+        ${(cot.produtos || []).map((p,i) => `
+          <div class="aviso-modulo" style="margin:10px 0">
+            <strong>${escaparHTML(p.nome)}</strong>
+            <p>Unidade: ${escaparHTML(p.unidade || "UN")}</p>
+            <label>Marca</label><input name="marca-${i}" placeholder="Marca oferecida">
+            <label>Preço unitário (R$)</label><input name="preco-${i}" type="number" min="0.01" step="0.01" required>
+            <label>Observação</label><input name="obs-${i}" placeholder="Opcional">
+          </div>`).join("")}
+        <label>Observação geral</label>
+        <textarea id="resposta-observacao-geral" rows="3"></textarea>
+        <button type="submit" id="enviar-resposta">ENVIAR RESPOSTA</button>
+        <button type="button" id="cancelar-resposta">CANCELAR</button>
+        <p id="mensagem-resposta"></p>
+      </form>`;
+    document.getElementById("cancelar-resposta").addEventListener("click", () => {
+      area.style.display = "none"; area.innerHTML = "";
+    });
+    document.getElementById("form-resposta").addEventListener("submit", enviarRespostaFornecedor);
+  } catch (erro) {
+    console.error(erro);
+    alert("Não foi possível abrir esta cotação.");
+  }
+}
+
+async function enviarRespostaFornecedor(evento) {
+  evento.preventDefault();
+  const area = document.getElementById("form-resposta-fornecedor");
+  const cotacaoId = area.dataset.cotacaoId;
+  const fornecedorId = area.dataset.fornecedorId;
+  const cotSnap = await getDoc(doc(db, "cotacoes", cotacaoId));
+  if (!cotSnap.exists() || cotSnap.data().status !== "aberta") {
+    mensagemNaTela("mensagem-resposta", "Esta cotação foi encerrada.", true);
+    return;
+  }
+  const cot = cotSnap.data();
+  const itens = (cot.produtos || []).map((p,i) => ({
+    produtoId: p.produtoId, nome: p.nome, unidade: p.unidade || "UN",
+    marca: document.querySelector(`[name="marca-${i}"]`)?.value.trim() || "",
+    preco: Number(document.querySelector(`[name="preco-${i}"]`)?.value),
+    observacao: document.querySelector(`[name="obs-${i}"]`)?.value.trim() || ""
+  }));
+  if (itens.some(i => !Number.isFinite(i.preco) || i.preco <= 0)) {
+    mensagemNaTela("mensagem-resposta", "Informe um preço válido para todos os produtos.", true);
+    return;
+  }
+  const botao = document.getElementById("enviar-resposta");
+  botao.disabled = true; botao.textContent = "ENVIANDO...";
+  try {
+    const respostaId = cotacaoId + "__" + fornecedorId;
+    await setDoc(doc(db, "respostas", respostaId), {
+      cotacaoId, fornecedorId, responsavelUid: auth.currentUser?.uid || "",
+      itens, observacaoGeral: document.getElementById("resposta-observacao-geral").value.trim(),
+      enviadoEm: serverTimestamp()
+    });
+    await updateDoc(doc(db, "cotacao_fornecedores", respostaId), { status: "respondido" });
+    mensagemNaTela("mensagem-resposta", "Resposta enviada com sucesso!");
+    area.style.display = "none";
+    area.innerHTML = "";
+    await carregarCotacoesFornecedor(auth.currentUser.uid);
+  } catch (erro) {
+    console.error(erro);
+    mensagemNaTela("mensagem-resposta", "Não foi possível enviar a resposta.", true);
+    botao.disabled = false; botao.textContent = "ENVIAR RESPOSTA";
   }
 }
 
