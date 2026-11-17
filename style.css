@@ -1078,3 +1078,66 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
  .comparacao-export-acoes{width:100%}
  .comparacao-export-acoes button{flex:1}
 }
+
+
+/* Cotação online do vendedor — apresentação em tabela inspirada na folha de cotação */
+.resposta-planilha{border:1px solid #d8e0ea!important;border-radius:10px!important;box-shadow:0 12px 34px rgba(20,42,68,.10)!important;background:#fff!important}
+.resposta-planilha .resposta-online-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px 24px!important;background:#174f83!important;border:0!important;color:#fff!important}
+.resposta-planilha .resposta-online-eyebrow{color:#d5e9fa!important}
+.resposta-planilha .resposta-online-header h3{color:#fff!important;font-size:22px!important;margin:6px 0 10px!important}
+.resposta-planilha .resposta-online-metricas{margin:0!important;color:#e6f1fb!important}
+.resposta-planilha .resposta-online-metricas span{background:rgba(255,255,255,.13)!important;color:#fff!important;border:1px solid rgba(255,255,255,.16)}
+.resposta-planilha .resposta-online-metricas b{color:#fff!important}
+.resposta-planilha .resposta-fechar{color:#fff!important;border-color:rgba(255,255,255,.4)!important;background:rgba(255,255,255,.12)!important}
+.resposta-cabecalho-identidade{min-width:0;flex:1}
+.resposta-salvar-topo{flex:none;min-height:43px;padding:0 18px;border:0;border-radius:7px;background:#f6d34b;color:#26384a;font-size:12px;font-weight:900;letter-spacing:.35px;cursor:pointer}
+.resposta-salvar-topo:hover{background:#ffe27a}
+.resposta-salvar-topo:disabled{opacity:.65;cursor:wait}
+.resposta-planilha .resposta-online-form{padding:20px 22px!important}
+.resposta-planilha .resposta-lista-cabecalho{align-items:flex-end;margin-bottom:12px}
+.resposta-planilha .resposta-lista-cabecalho h4{margin:4px 0 0;font-size:18px;color:#25384a}
+.resposta-planilha .resposta-progresso-trilho{height:7px;border-radius:20px;background:#e8eef4}
+.resposta-planilha .resposta-progresso-trilho span{background:#2474ad}
+.resposta-tabela-legenda{display:flex;justify-content:space-between;gap:12px;margin:15px 0 9px;color:#66717c;font-size:12px}
+.resposta-tabela-scroll{width:100%;overflow-x:auto;border:1px solid #d8e0e8;border-radius:8px;background:#fff;overscroll-behavior-x:contain}
+.resposta-tabela{width:100%;min-width:1040px;border-collapse:separate!important;border-spacing:0!important;border-radius:0!important;font-size:12px}
+.resposta-tabela thead th{position:sticky;top:0;z-index:1;padding:12px 10px!important;background:#1d5a8e!important;color:#fff!important;border:0!important;border-right:1px solid rgba(255,255,255,.15)!important;text-align:left;font-size:11px;font-weight:850;white-space:nowrap}
+.resposta-tabela tbody td{padding:10px!important;vertical-align:middle!important;border:0!important;border-bottom:1px solid #eadb83!important;border-right:1px solid rgba(174,147,36,.16)!important;background:#fff8d7!important}
+.resposta-tabela tbody tr:nth-child(even) td{background:#fff3bd!important}
+.resposta-tabela tbody tr:hover td{background:#ffed9d!important}
+.resposta-tabela .resposta-col-item{width:48px;text-align:center}
+.resposta-produto-numero{display:inline-flex;align-items:center;justify-content:center;min-width:29px;height:27px;padding:0 6px;border-radius:5px;background:#e4edf5;color:#285477;font-size:11px;font-weight:900}
+.resposta-tabela .resposta-col-produto{min-width:225px}
+.resposta-tabela .resposta-col-produto strong{display:block;color:#273747;font-size:12px;line-height:1.35}
+.resposta-tabela .resposta-col-produto small,.resposta-tabela .resposta-col-qtd small{display:block;margin-top:4px;color:#66717c;font-size:10px;line-height:1.35}
+.resposta-tabela .resposta-col-qtd{min-width:85px;text-align:center;font-weight:800;color:#26394a}
+.resposta-tabela .resposta-col-empresa{min-width:175px}
+.resposta-tabela .resposta-col-preco{min-width:135px}
+.resposta-tabela .resposta-col-indisponivel{min-width:125px}
+.resposta-tabela .resposta-col-obs{min-width:210px}
+.resposta-tabela select,.resposta-tabela input:not([type=checkbox]){display:block;width:100%;min-width:0;min-height:37px;padding:7px 9px;border:1px solid #d6c875;border-radius:5px;background:#fffef8;color:#293746;font:inherit;font-size:12px}
+.resposta-tabela select:focus,.resposta-tabela input:focus{outline:2px solid rgba(29,90,142,.22);border-color:#3777a8}
+.resposta-preco-campo{display:flex;align-items:center;gap:5px;color:#56616b;font-size:11px;font-weight:800}
+.resposta-preco-campo input{flex:1}
+.resposta-tabela .resposta-indisponivel{display:flex;align-items:center;gap:6px;margin:0;color:#654e0b;font-size:10px;font-weight:800;white-space:nowrap}
+.resposta-tabela .resposta-indisponivel input{width:16px;height:16px;accent-color:#1d5a8e}
+.resposta-planilha .paginacao-resposta{margin:13px 0 18px}
+.resposta-planilha .paginacao-resposta button{border-radius:6px!important;background:#eef3f7!important;color:#25445f!important;border:1px solid #d6e0e8!important}
+.resposta-planilha .resposta-condicoes-gerais{display:block;margin:15px 0;color:#344454;font-size:12px;font-weight:800}
+.resposta-planilha .resposta-condicoes-gerais textarea{display:block;width:100%;margin-top:7px;padding:11px;border:1px solid #d7dfe6;border-radius:7px;font:inherit;font-weight:400}
+.resposta-planilha .resposta-enviar-btn{border-radius:7px!important;background:#1d5a8e!important;color:#fff!important}
+@media(max-width:700px){
+ .resposta-planilha .resposta-online-header{align-items:flex-start;padding:17px 14px!important;gap:10px;flex-wrap:wrap}
+ .resposta-cabecalho-identidade{flex:1 1 calc(100% - 48px)}
+ .resposta-salvar-topo{width:100%;order:3}
+ .resposta-planilha .resposta-online-form{padding:15px 11px!important}
+ .resposta-tabela-legenda{align-items:flex-start;flex-direction:column}
+ .resposta-tabela{min-width:1000px}
+}
+
+.resposta-planilha .resposta-fechar{position:static!important;flex:none;order:0}
+.resposta-planilha .resposta-cabecalho-identidade{order:1}
+.resposta-planilha .resposta-salvar-topo{order:2}
+.comparacao-cotacao .comparacao-tabela thead th{background:#1d5a8e!important;color:#fff!important}
+.comparacao-cotacao .comparacao-tabela tbody th{background:#fff3bd!important;color:#273747!important}
+.comparacao-cotacao .comparacao-tabela tbody td{background:#fffdf4}
