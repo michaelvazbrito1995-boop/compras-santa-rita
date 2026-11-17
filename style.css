@@ -819,3 +819,182 @@ footer span {
 .resposta-empresa-produto{display:block;width:100%;min-width:0;padding:12px 11px!important;border:1.5px solid #d8c77f!important;border-radius:9px!important;background:#fff!important;color:#333;font-size:14px!important;font-weight:700}
 .resposta-empresa-produto:focus{outline:0;border-color:#b58d00!important;box-shadow:0 0 0 3px rgba(219,180,0,.12)}
 .cotacao-empresas-vendedor .cotacao-empresa-vendedor{grid-template-columns:minmax(0,1fr) auto}
+
+
+/* =========================================================
+   COMPRAS SANTA RITA — IDENTIDADE VISUAL PROFISSIONAL
+   Camada visual: preserva IDs, fluxos, dados e estrutura.
+   ========================================================= */
+:root{
+  --sr-yellow:#f3c928;
+  --sr-yellow-dark:#d7ad0c;
+  --sr-ink:#252a31;
+  --sr-muted:#69717c;
+  --sr-bg:#f4f5f7;
+  --sr-surface:#ffffff;
+  --sr-line:#e7e9ed;
+  --sr-soft:#fff9df;
+  --sr-radius:18px;
+  --sr-shadow:0 8px 28px rgba(28,35,45,.07);
+}
+html{scroll-behavior:smooth}
+body{
+  background:var(--sr-bg);
+  color:var(--sr-ink);
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select,textarea{font:inherit}
+button{
+  border-radius:12px;
+  transition:transform .16s ease,box-shadow .16s ease,background .16s ease,border-color .16s ease;
+}
+button:not(:disabled):active{transform:translateY(1px)}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:3px solid rgba(218,177,12,.25);outline-offset:2px
+}
+.topo{
+  position:relative;
+  overflow:hidden;
+  background:linear-gradient(125deg,#f8d94d 0%,#f2c51d 58%,#e8b80c 100%);
+  color:#242424;
+  text-align:left;
+  padding:25px max(20px,calc((100% - 1080px)/2));
+  border:0;
+  box-shadow:0 3px 18px rgba(55,45,10,.09);
+}
+.topo:after{
+  content:"";position:absolute;width:260px;height:260px;border:1px solid rgba(255,255,255,.27);
+  border-radius:50%;right:-85px;top:-150px;box-shadow:0 0 0 24px rgba(255,255,255,.07),0 0 0 52px rgba(255,255,255,.05)
+}
+.topo .logo{font-size:36px;margin:0 0 4px}
+.topo h1{font-size:clamp(22px,3vw,29px);font-weight:850;letter-spacing:-.7px}
+.topo p{margin-top:3px;font-size:13px;color:rgba(35,35,35,.72);font-weight:550}
+.container{max-width:1080px;margin:30px auto;padding:0 20px}
+.login-card{
+  position:relative;max-width:470px;margin:clamp(22px,7vh,76px) auto;
+  padding:34px 32px 30px;border:1px solid rgba(230,232,235,.9);
+  border-radius:24px;background:var(--sr-surface);box-shadow:0 18px 55px rgba(31,38,48,.10)
+}
+.login-card:before{
+  content:"";display:block;width:48px;height:5px;border-radius:8px;background:var(--sr-yellow);margin-bottom:24px
+}
+.login-card h2{font-size:27px;letter-spacing:-.7px;margin-bottom:7px}
+.login-card>p{font-size:14px;color:var(--sr-muted);margin-bottom:24px}
+label{color:#343a43;font-size:14px;font-weight:700;margin:15px 0 7px}
+input,select,textarea{
+  color:var(--sr-ink);background:#fff;border:1px solid #dfe2e7;border-radius:12px;
+  transition:border-color .16s,box-shadow .16s
+}
+input:focus,select:focus,textarea:focus{border-color:#d6ad17;box-shadow:0 0 0 4px rgba(243,201,40,.13);outline:0}
+.login-card input{padding:15px 16px;background:#fafbfc}
+.login-card button,.resposta-enviar-btn,#salvar-cotacao{
+  background:linear-gradient(135deg,#f7d64b,#efc11b);color:#292817;border:0;
+  box-shadow:0 5px 13px rgba(204,163,0,.19);font-weight:850;letter-spacing:.25px
+}
+.login-card button{padding:15px;margin-top:22px;border-radius:12px}
+.login-card button:hover,.resposta-enviar-btn:hover,#salvar-cotacao:hover{box-shadow:0 8px 18px rgba(204,163,0,.25);filter:saturate(1.04)}
+#mensagem,[id^="mensagem-"]{font-size:13px}
+.painel{display:flex;flex-direction:column;gap:20px}
+.painel-topo{
+  padding:21px 23px;border:1px solid var(--sr-line);border-radius:18px;
+  background:var(--sr-surface);box-shadow:var(--sr-shadow)
+}
+.painel-topo h2{font-size:21px;font-weight:800;letter-spacing:-.4px}
+.painel-topo p{color:var(--sr-muted)}
+.botao-sair{border-radius:11px;padding:11px 16px;background:#303640}
+.painel-titulo{margin:8px 0 0}
+.painel-titulo h2{font-size:23px;font-weight:850;letter-spacing:-.55px}
+.painel-titulo p{color:var(--sr-muted)}
+.menu-painel{gap:14px}
+.menu-card{
+  position:relative;min-height:142px;padding:20px;border:1px solid var(--sr-line);
+  border-radius:17px;background:var(--sr-surface);box-shadow:0 4px 15px rgba(31,38,48,.035)
+}
+.menu-card:hover{transform:translateY(-2px);border-color:#e6d27c;box-shadow:var(--sr-shadow)}
+.menu-icone{display:grid;place-items:center;width:43px;height:43px;border-radius:13px;background:var(--sr-soft);font-size:23px}
+.menu-card strong{font-size:15px;font-weight:800}
+.menu-card small{line-height:1.45;color:var(--sr-muted)}
+.modulo-aberto{
+  margin-top:0;padding:clamp(18px,3vw,30px);border:1px solid var(--sr-line);
+  border-radius:20px;background:var(--sr-surface);box-shadow:var(--sr-shadow)
+}
+.modulo-aberto h2{font-size:23px;letter-spacing:-.5px;font-weight:850}
+.modulo-aberto h3{font-size:17px;font-weight:800}
+.modulo-aberto>button,.modulo-aberto button{
+  border-radius:11px;padding:12px 17px;font-weight:800
+}
+.modulo-aberto input,.modulo-aberto select,.modulo-aberto textarea{max-width:100%}
+.aviso-modulo{
+  border:1px solid #efe5b9;border-left:4px solid var(--sr-yellow);border-radius:13px;
+  background:#fffdf4;padding:16px
+}
+footer{padding:25px 12px;color:#77808a;font-size:12px}
+footer strong{color:#404751}
+#conteudo-modulo hr{margin:24px 0;border-color:var(--sr-line)}
+#form-produto input,#form-produto select,#pesquisa-produto,
+#form-cotacao input,#form-cotacao select,#form-cotacao textarea{
+  border:1px solid #dfe2e7;border-radius:11px;background:#fff
+}
+#form-produto button,#form-cotacao button,#conteudo-modulo .modulo-aberto>button{
+  border-radius:11px;font-weight:800
+}
+#lista-produtos .aviso-modulo{border-radius:13px}
+.resultado-produto-cotacao,.fornecedor-convite-item,.produto-linha{
+  border:1px solid var(--sr-line)!important;border-radius:12px!important;background:#fff!important
+}
+.fornecedor-convite-item{padding:12px 14px!important;margin:8px 0!important}
+.fornecedor-convite-item:has(input:checked){border-color:#e0bd35!important;background:#fffbed!important}
+.resultado-produto-cotacao{padding:13px!important;margin:8px 0!important}
+.resultado-produto-cotacao button{border-radius:9px!important}
+.cotacao-vendedor-card,.resposta-online-shell{
+  border:1px solid var(--sr-line)!important;border-radius:20px!important;
+  box-shadow:var(--sr-shadow)!important;background:#fff!important
+}
+.cotacao-vendedor-card{padding:20px!important;margin:14px 0!important}
+.cotacao-empresa-vendedor,.cotacao-empresa-identidade{
+  border-radius:12px
+}
+.resposta-online-shell{overflow:hidden}
+.resposta-online-header{padding:22px!important}
+.resposta-produto-card{
+  border:1px solid #e8e8e2!important;border-radius:18px!important;
+  box-shadow:0 4px 15px rgba(30,35,40,.035)!important
+}
+.resposta-empresa-produto,.resposta-preco-wrap,.resposta-observacao-input{
+  border-radius:12px!important
+}
+.resposta-empresa-produto{min-height:50px;font-weight:650}
+.resposta-preco-wrap input{min-height:58px}
+.resposta-paginacao-nova button{border-radius:10px!important}
+.resposta-acoes-finais{border-top:1px solid var(--sr-line);padding-top:20px}
+.resposta-enviar-btn{width:100%;min-height:52px;border-radius:13px!important}
+.cotacao-status,.cotacao-empresa-status{border-radius:999px;padding:5px 10px;font-size:11px;font-weight:800}
+table{border-collapse:separate;border-spacing:0;overflow:hidden;border-radius:12px}
+th{background:#f6f7f8;color:#454c55}
+td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
+@media(max-width:600px){
+  .topo{padding:18px 20px}
+  .topo .logo{font-size:30px}
+  .container{margin:17px auto;padding:0 12px}
+  .login-card{margin:28px auto;padding:27px 21px 23px;border-radius:20px}
+  .login-card h2{font-size:24px}
+  .painel-topo{padding:17px;flex-wrap:wrap}
+  .painel-topo h2{font-size:18px}
+  .painel-titulo h2{font-size:20px}
+  .menu-painel{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .menu-card{min-height:130px;padding:14px 12px;border-radius:14px}
+  .menu-icone{width:37px;height:37px;font-size:20px}
+  .menu-card strong{font-size:13px;line-height:1.3}
+  .menu-card small{font-size:11px}
+  .modulo-aberto{padding:17px 13px;border-radius:16px}
+  .modulo-aberto h2{font-size:20px}
+  .cotacao-vendedor-card{padding:15px!important}
+  .resposta-online-header{padding:18px 15px!important}
+  .resposta-produto-card{padding:15px!important}
+  .fornecedor-convite-item{align-items:flex-start}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{scroll-behavior:auto!important;transition:none!important}
+}

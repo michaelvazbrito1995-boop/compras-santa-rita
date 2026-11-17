@@ -1182,7 +1182,7 @@ async function abrirModuloCotacoes(conteudo) {
             <div id="cotacao-produtos">Nenhum produto selecionado.</div>
           </div>
           <h3 style="margin-top:22px">Fornecedores convidados</h3>
-          <p class="ajuda-cotacao">O nome do titular aparece junto da empresa que ele representa.</p>
+          <p class="ajuda-cotacao">Selecione uma empresa do vendedor. Todas as empresas ativas cadastradas por esse mesmo vendedor serão convidadas, permitindo escolher uma empresa diferente em cada produto.</p>
           <div id="cotacao-fornecedores">Carregando fornecedores...</div>
           <button type="submit" id="salvar-cotacao">CRIAR COTAÇÃO</button>
           <button type="button" id="cancelar-cotacao">CANCELAR</button>
@@ -1455,8 +1455,15 @@ async function salvarCotacao(evento) {
       produtoId: d.id, nome: d.data().nome || "", descricao: d.data().descricao || "", codigoBarras: d.data().codigoBarras || "", unidade: d.data().unidade || "UN",
       quantidade: Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(d.id)}"]`)?.value || 1)
     }));
-    const fornecedores = fornSnap.docs.filter(d => fornecedorIds.includes(d.id) && d.data().ativo === true);
-    if (fornecedores.length !== fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
+    // Ao convidar um vendedor, incluir todas as empresas ativas cadastradas
+    // por ele. Assim, a resposta pode alternar de empresa por produto.
+    const selecionados = fornSnap.docs.filter(d => fornecedorIds.includes(d.id) && d.data().ativo === true);
+    if (selecionados.length !== fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
+
+    const titularesConvidados = new Set(selecionados.map(d => d.data().responsavelUid).filter(Boolean));
+    const fornecedores = fornSnap.docs.filter(d =>
+      d.data().ativo === true && titularesConvidados.has(d.data().responsavelUid)
+    );
 
     const cotacaoRef = doc(collection(db, "cotacoes"));
     const responsaveisUids = [...new Set(fornecedores.map(f => f.data().responsavelUid).filter(Boolean))];
