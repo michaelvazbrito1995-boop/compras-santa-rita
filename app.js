@@ -1421,10 +1421,15 @@ function renderizarProdutosSelecionadosCotacao() {
       <input type="checkbox" name="cotacao-produto" value="${escaparHTML(p.id)}" checked hidden>
       <span><strong>${escaparHTML(p.nome)}</strong><small>${escaparHTML(p.codigoBarras || "Sem código")} · ${escaparHTML(p.unidade || "UN")}</small></span>
       <label class="qtd-cotacao-label">Quantidade
-        <input type="number" min="0.001" step="0.001" value="1" data-qtd-cotacao="${escaparHTML(p.id)}" required style="width:95px">
+        <input type="number" min="0.001" step="0.001" value="${Number(p.quantidade||1)}" data-qtd-cotacao="${escaparHTML(p.id)}" required style="width:95px">
       </label>
       <button type="button" data-remover-produto-cotacao="${escaparHTML(p.id)}" aria-label="Remover ${escaparHTML(p.nome)}">REMOVER</button>
     </div>`).join("");
+
+  area.querySelectorAll("[data-qtd-cotacao]").forEach(input => input.addEventListener("input", () => {
+    const produto = produtosSelecionadosCotacao.get(input.dataset.qtdCotacao);
+    if (produto) produto.quantidade = Number(input.value || 0);
+  }));
 
   area.querySelectorAll("[data-remover-produto-cotacao]").forEach(botao => {
     botao.addEventListener("click", () => {
@@ -1454,7 +1459,7 @@ async function salvarCotacao(evento, comoRascunho = false) {
   botao.disabled = true; const textoOriginal=botao.textContent; botao.textContent=comoRascunho?"SALVANDO...":"ENVIANDO...";
   try {
     const [prodSnap, fornSnap] = await Promise.all([getDocs(collection(db,"produtos")),getDocs(collection(db,"fornecedores"))]);
-    const produtos = produtoIds.map(id=>{const d=prodSnap.docs.find(x=>x.id===id);if(!d)return null;const data=d.data();return {produtoId:id,nome:data.nome||"",descricao:data.descricao||"",codigoBarras:data.codigoBarras||"",unidade:data.unidade||"UN",quantidade:Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(id)}"]`)?.value||1)};}).filter(Boolean);
+    const produtos = produtoIds.map(id=>{const d=prodSnap.docs.find(x=>x.id===id);if(!d)return null;const data=d.data();return {produtoId:id,nome:data.nome||"",descricao:data.descricao||"",codigoBarras:data.codigoBarras||"",unidade:data.unidade||"UN",quantidade:Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(id)}"]`)?.value||produtosSelecionadosCotacao.get(id)?.quantidade||1)};}).filter(Boolean);
     if (produtos.some(p=>!(p.quantidade>0))) throw new Error("QUANTIDADE_INVALIDA");
     const selecionados = fornSnap.docs.filter(d=>fornecedorIds.includes(d.id)&&d.data().ativo===true);
     if (!comoRascunho && selecionados.length!==fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
@@ -1649,10 +1654,36 @@ async function carregarRespostasAdmin(){
    const empresas=rs.map(r=>({id:r.fornecedorId,nome:fornecedores.get(r.fornecedorId)?.empresa||"Empresa removida",itens:r.itens||[],geral:r.observacaoGeral||""}));
    const produtos=c.produtos||[];
    const linhas=produtos.map((p,i)=>{const celulas=empresas.map(e=>{const it=e.itens.find(x=>Number(x.indiceProduto)===i);if(!it)return `<td class="comparacao-vazia">—</td>`;return `<td><strong>${it.indisponivel?"Não fornece":Number(it.preco||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</strong>${it.observacao?`<small>${escaparHTML(it.observacao)}</small>`:""}</td>`;}).join("");return `<tr><th scope="row"><strong>${escaparHTML(p.nome)}</strong><small>Código: ${escaparHTML(p.codigoBarras||"—")} · ${Number(p.quantidade||1)} ${escaparHTML(p.unidade||"UN")}</small></th>${celulas}</tr>`;}).join("");
-   blocos.push(`<section class="comparacao-cotacao"><h3>${escaparHTML(c.titulo||"Cotação")}</h3><p class="comparacao-meta">${produtos.length} produtos · Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p><div class="comparacao-tabela-wrap"><table class="comparacao-tabela"><thead><tr><th>Produto</th>${empresas.map(e=>`<th>${escaparHTML(e.nome)}</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div>${empresas.filter(e=>e.geral).map(e=>`<p class="comparacao-observacao"><b>${escaparHTML(e.nome)}:</b> ${escaparHTML(e.geral)}</p>`).join("")}</section>`);
+   const exportId=`cotacao-export-${blocos.length}`;
+   blocos.push(`<section class="comparacao-cotacao" id="${exportId}"><div class="comparacao-export-cabecalho"><div><span class="comparacao-export-kicker">COMPRAS SANTA RITA · MAPA DE PREÇOS</span><h3>${escaparHTML(c.titulo||"Cotação")}</h3><p class="comparacao-meta">${produtos.length} produtos · Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p></div><div class="comparacao-export-acoes"><button type="button" data-exportar-pdf="${exportId}">↧ PDF</button><button type="button" data-exportar-imagem="${exportId}">▧ Imagem</button></div></div><div class="comparacao-tabela-wrap"><table class="comparacao-tabela"><thead><tr><th>Produto</th>${empresas.map(e=>`<th>${escaparHTML(e.nome)}</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div>${empresas.filter(e=>e.geral).map(e=>`<p class="comparacao-observacao"><b>${escaparHTML(e.nome)}:</b> ${escaparHTML(e.geral)}</p>`).join("")}<p class="comparacao-export-rodape">Documento gerado pelo sistema Compras Santa Rita.</p></section>`);
   }
   area.innerHTML=blocos.join("")||'<div class="aviso-modulo">Ainda não há propostas para comparar nesta seleção.</div>';
+  area.querySelectorAll("[data-exportar-pdf]").forEach(btn=>btn.addEventListener("click",()=>exportarComparacaoPDF(btn.dataset.exportarPdf)));
+  area.querySelectorAll("[data-exportar-imagem]").forEach(btn=>btn.addEventListener("click",()=>exportarComparacaoImagem(btn.dataset.exportarImagem)));
  }catch(e){console.error(e);area.textContent="Não foi possível carregar a comparação de ofertas.";}
+}
+
+
+// Exportação exclusiva do relatório de respostas da cotação online.
+function exportarComparacaoPDF(id){
+  const origem=document.getElementById(id);if(!origem)return;
+  const janela=window.open("","_blank");
+  if(!janela){alert("Permita pop-ups para gerar o PDF.");return;}
+  const clone=origem.cloneNode(true);clone.querySelectorAll(".comparacao-export-acoes").forEach(x=>x.remove());
+  janela.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Mapa de preços</title><style>
+    *{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#252525;padding:22px;font-size:11px}.comparacao-export-kicker{font-size:9px;letter-spacing:1.2px;color:#8a7110;font-weight:bold}h3{font-size:22px;margin:7px 0}.comparacao-meta{color:#666;margin:0 0 16px}.comparacao-tabela-wrap{overflow:visible}table{width:100%;border-collapse:collapse;table-layout:auto}th,td{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}thead th{background:#fff4c7}tbody th{background:#fafafa;min-width:150px}td small,th small{display:block;color:#666;font-size:9px;margin-top:4px}.comparacao-observacao{padding:8px;background:#faf8ef}.comparacao-export-rodape{margin-top:22px;color:#888;font-size:9px}@page{size:landscape;margin:12mm}@media print{body{padding:0}}
+  </style></head><body>${clone.outerHTML}<script>window.onload=()=>setTimeout(()=>window.print(),250)<\/script></body></html>`);
+  janela.document.close();
+}
+async function exportarComparacaoImagem(id){
+  const origem=document.getElementById(id);if(!origem)return;
+  try{
+    if(typeof window.html2canvas!=="function"){
+      await new Promise((resolve,reject)=>{const script=document.createElement("script");script.src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";script.onload=resolve;script.onerror=()=>reject(new Error("Não foi possível carregar o exportador de imagem."));document.head.appendChild(script);});
+    }
+    const canvas=await window.html2canvas(origem,{backgroundColor:"#ffffff",scale:2,useCORS:true,logging:false,windowWidth:Math.max(origem.scrollWidth,1200),onclone:(doc)=>{const bloco=doc.getElementById(id);if(bloco){bloco.querySelectorAll(".comparacao-tabela-wrap").forEach(x=>{x.style.overflow="visible";x.style.maxWidth="none";});bloco.querySelectorAll(".comparacao-tabela").forEach(x=>{x.style.minWidth="0";x.style.width="100%";});}}});
+    const link=document.createElement("a");link.download=`mapa-de-precos-${new Date().toISOString().slice(0,10)}.png`;link.href=canvas.toDataURL("image/png");link.click();
+  }catch(e){console.error(e);alert(e.message||"Não foi possível exportar a imagem. Tente novamente.");}
 }
 
 
@@ -1800,7 +1831,7 @@ async function abrirFormularioResposta(cotacaoId) {
     area.style.display="block";area.dataset.cotacaoId=cotacaoId;area._empresas=empresas;area._rascunho=dados;
     area.innerHTML=`<section class="resposta-online-shell"><div class="resposta-online-header"><button type="button" class="resposta-fechar" id="cancelar-resposta">×</button><span class="resposta-online-eyebrow">ORÇAMENTO PARA PREENCHIMENTO</span><h3>${escaparHTML(cot.titulo||"Cotação")}</h3><div class="resposta-online-metricas"><span><b>${produtos.length}</b> produtos</span><span><b>${cot.prazo?new Date(cot.prazo).toLocaleDateString("pt-BR"):"—"}</b> prazo final</span></div></div>${cot.descricao?`<div class="resposta-orientacoes"><strong>Orientações do comprador</strong><p>${escaparHTML(cot.descricao)}</p></div>`:""}<form id="form-resposta" class="resposta-online-form"><div class="resposta-lista-cabecalho"><div><span class="resposta-online-eyebrow">ITENS DO ORÇAMENTO</span><h4>Informe seus preços</h4></div><span id="resposta-progresso-texto"></span></div><div class="resposta-progresso-trilho"><span id="resposta-progresso-barra"></span></div><div id="resposta-itens-pagina"></div><div class="paginacao-resposta"><button type="button" id="resposta-anterior">← Anterior</button><span id="resposta-pagina-info"></span><button type="button" id="resposta-proxima">Próxima →</button></div><label>Condições comerciais gerais (opcional)<textarea id="resposta-observacao-geral" rows="3" placeholder="Prazo de entrega, pagamento, validade..."></textarea></label><button type="submit" id="enviar-resposta" class="resposta-enviar-btn">ENVIAR ORÇAMENTO</button><p id="mensagem-resposta" role="status"></p></form></section>`;
     document.getElementById("resposta-observacao-geral").value=geral;
-    const porPagina=4;let pagina=0;const total=produtos.length;
+    const porPagina=10;let pagina=0;const total=produtos.length;
     const guardar=()=>area.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);dados.set(n,{fornecedorId:bloco.querySelector(`[name="empresa-${n}"]`)?.value||"",indisponivel:!!bloco.querySelector(`[name="indisponivel-${n}"]`)?.checked,preco:bloco.querySelector(`[name="preco-${n}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}"]`)?.value||""});});
     const progresso=()=>{const preenchidos=produtos.reduce((acc,_,i)=>{const d=dados.get(i)||{};return acc+(d.fornecedorId&&(d.indisponivel||Number(d.preco)>0)?1:0);},0);document.getElementById("resposta-progresso-texto").textContent=`${preenchidos} de ${total} produtos`;document.getElementById("resposta-progresso-barra").style.width=`${total?preenchidos/total*100:0}%`;};
     const render=()=>{const inicio=pagina*porPagina;document.getElementById("resposta-itens-pagina").innerHTML=produtos.slice(inicio,inicio+porPagina).map((p,i)=>{const n=inicio+i;const d=dados.get(n)||{};return `<article class="resposta-produto-card" data-resposta-item="${n}"><div class="resposta-produto-topo"><span class="resposta-produto-numero">${String(n+1).padStart(2,"0")}</span><span>${escaparHTML(p.unidade||"UN")}</span></div><h5>${escaparHTML(p.nome||"Produto")}</h5><p>Código: ${escaparHTML(p.codigoBarras||"Não informado")} · Quantidade: ${Number(p.quantidade||1).toLocaleString("pt-BR")} ${escaparHTML(p.unidade||"UN")}</p><section class="oferta-vendedor-bloco"><label>Empresa que fará a oferta<select name="empresa-${n}"><option value="">Selecione a empresa</option>${empresas.map(e=>`<option value="${escaparHTML(e.fornecedorId)}" ${d.fornecedorId===e.fornecedorId?"selected":""}>${escaparHTML(e.empresa)}</option>`).join("")}</select></label><label>Preço unitário (R$)<input name="preco-${n}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" value="${escaparHTML(d.preco||"")}" ${d.indisponivel?"disabled":""}></label><label class="resposta-indisponivel"><input type="checkbox" name="indisponivel-${n}" ${d.indisponivel?"checked":""}><span>Esta empresa não tem o produto</span></label><label>Observação / bonificação (opcional)<input name="obs-${n}" placeholder="Bonificação, marca, entrega..." value="${escaparHTML(d.observacao||"")}"></label></section></article>`;}).join("");
