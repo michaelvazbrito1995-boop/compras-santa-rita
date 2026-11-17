@@ -1004,3 +1004,30 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
 .pres-matriz th{white-space:normal;line-height:1.35;background:#fff7d8;color:#5d501b}
 .pres-matriz td{vertical-align:middle}
 .pres-matriz .pres-vencedor{min-width:145px;padding:10px;border:1px solid #d9dce1;border-radius:9px;background:#fff}
+
+/* Cotação online: orçamento editável, rascunhos e ofertas lado a lado */
+.cotacao-acoes-editor{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0 12px}
+.cotacao-acoes-editor button{min-height:48px;border-radius:12px;font-weight:800}
+#salvar-rascunho{background:#f4f5f6;color:#343a43;border:1px solid #dfe2e7}
+#previsualizar-cotacao{background:#fff8dd;color:#5c4b09;border:1px solid #ead98b}
+#salvar-cotacao{grid-column:1/-1;background:linear-gradient(135deg,#f7d64b,#efc11b);color:#292817;border:0}
+.comparacao-cotacao{margin:16px 0;padding:18px;border:1px solid #e5e7eb;border-radius:17px;background:#fff;box-shadow:0 5px 18px rgba(25,32,42,.045)}
+.comparacao-cotacao h3{margin:0 0 4px;font-size:19px;font-weight:850}
+.comparacao-meta{margin:0 0 14px;color:#69717c;font-size:13px}
+.comparacao-tabela-wrap{width:100%;overflow-x:auto;border:1px solid #e7e9ed;border-radius:12px}
+.comparacao-tabela{width:100%;min-width:620px;border-collapse:separate;border-spacing:0;margin:0}
+.comparacao-tabela th,.comparacao-tabela td{padding:12px 13px;border-right:1px solid #e7e9ed;border-bottom:1px solid #e7e9ed;vertical-align:top;text-align:left}
+.comparacao-tabela thead th{background:#fff7d8;color:#5d501b;font-size:13px}
+.comparacao-tabela tbody th{min-width:180px;background:#fafbfc;font-weight:700}
+.comparacao-tabela tbody td{min-width:145px;font-weight:750}
+.comparacao-tabela td small,.comparacao-tabela th small{display:block;margin-top:5px;color:#69717c;font-size:11px;font-weight:500;line-height:1.4}
+.comparacao-tabela .comparacao-vazia{color:#a0a5ad;font-weight:500;text-align:center}
+.comparacao-observacao{padding:10px 12px;margin:10px 0 0;border-radius:10px;background:#f6f7f8;color:#525a64;font-size:13px}
+.oferta-vendedor-bloco{padding:14px;margin:14px 0;border:1px solid #e5e7eb;border-radius:14px;background:#fbfcfd}
+.oferta-vendedor-bloco h6{margin:0 0 10px;color:#8a7414;font-size:12px;letter-spacing:.08em;font-weight:850}
+.oferta-vendedor-bloco label{display:block;margin:10px 0 5px;font-size:13px;font-weight:700}
+.oferta-vendedor-bloco select,.oferta-vendedor-bloco input:not([type=checkbox]){display:block;width:100%;min-height:45px;padding:10px 12px;margin-top:5px;border:1px solid #dfe2e7;border-radius:10px;background:#fff}
+.oferta-vendedor-bloco .resposta-indisponivel{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid #ece7d5;border-radius:10px;background:#fffdf5}
+.oferta-vendedor-bloco .resposta-indisponivel input{width:18px;height:18px;flex:0 0 auto}
+.resposta-produto-card>p{color:#69717c;font-size:13px}
+@media(max-width:600px){.cotacao-acoes-editor{grid-template-columns:1fr}.cotacao-acoes-editor button{width:100%}.comparacao-cotacao{padding:12px}.oferta-vendedor-bloco{padding:11px}}

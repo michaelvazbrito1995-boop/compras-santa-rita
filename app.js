@@ -64,6 +64,7 @@ let fotoProdutoAtual = "";
 // Estado da seleção de produtos na criação de cotações.
 let produtosDisponiveisCotacao = [];
 let produtosSelecionadosCotacao = new Map();
+let cotacaoRascunhoEditandoId = null;
 
 // FUNÇÕES GERAIS
 
@@ -1184,8 +1185,8 @@ async function abrirModuloCotacoes(conteudo) {
           <h3 style="margin-top:22px">Fornecedores convidados</h3>
           <p class="ajuda-cotacao">Selecione uma empresa do vendedor. Todas as empresas ativas cadastradas por esse mesmo vendedor serão convidadas, permitindo escolher uma empresa diferente em cada produto.</p>
           <div id="cotacao-fornecedores">Carregando fornecedores...</div>
-          <button type="submit" id="salvar-cotacao">CRIAR COTAÇÃO</button>
-          <button type="button" id="cancelar-cotacao">CANCELAR</button>
+          <div class="cotacao-acoes-editor"><button type="button" id="salvar-rascunho">SALVAR RASCUNHO</button><button type="button" id="previsualizar-cotacao">VISUALIZAR ORÇAMENTO</button><button type="submit" id="salvar-cotacao">ENVIAR AOS VENDEDORES</button></div>
+          <button type="button" id="cancelar-cotacao">FECHAR</button>
           <p id="mensagem-cotacao"></p>
         </form>
       </div>
@@ -1198,15 +1199,20 @@ async function abrirModuloCotacoes(conteudo) {
   document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
   document.getElementById("nova-cotacao-presencial").addEventListener("click", abrirFormularioPresencial);
   document.getElementById("nova-cotacao").addEventListener("click", async () => {
+    cotacaoRascunhoEditandoId = null;
+    document.getElementById("salvar-cotacao").textContent = "ENVIAR AOS VENDEDORES";
     document.getElementById("form-cotacao-area").style.display = "block";
     await carregarOpcoesCotacao();
   });
   document.getElementById("cancelar-cotacao").addEventListener("click", () => {
     document.getElementById("form-cotacao").reset();
     produtosSelecionadosCotacao = new Map();
+    cotacaoRascunhoEditandoId = null;
     document.getElementById("form-cotacao-area").style.display = "none";
   });
-  document.getElementById("form-cotacao").addEventListener("submit", salvarCotacao);
+  document.getElementById("form-cotacao").addEventListener("submit", evento => salvarCotacao(evento, false));
+  document.getElementById("salvar-rascunho").addEventListener("click", () => salvarCotacao(null, true));
+  document.getElementById("previsualizar-cotacao").addEventListener("click", visualizarOrcamentoOnline);
   await carregarListaCotacoesAdmin();
 }
 
@@ -1425,86 +1431,89 @@ function renderizarProdutosSelecionadosCotacao() {
   });
 }
 
-async function salvarCotacao(evento) {
-  evento.preventDefault();
-  const botao = document.getElementById("salvar-cotacao");
+async function salvarCotacao(evento, comoRascunho = false) {
+  if (evento) evento.preventDefault();
+  const botao = document.getElementById(comoRascunho ? "salvar-rascunho" : "salvar-cotacao");
   const titulo = document.getElementById("cotacao-titulo").value.trim();
   const descricao = document.getElementById("cotacao-descricao").value.trim();
   const prazoTexto = document.getElementById("cotacao-prazo").value;
   const produtoIds = [...document.querySelectorAll('input[name="cotacao-produto"]:checked')].map(x => x.value);
   const fornecedorIds = [...document.querySelectorAll('input[name="cotacao-fornecedor"]:checked')].map(x => x.value);
-
-  if (!titulo || !prazoTexto || produtoIds.length === 0 || fornecedorIds.length === 0) {
-    mensagemNaTela("mensagem-cotacao", "Informe título, prazo, pelo menos um produto e um fornecedor.", true);
-    return;
+  if (!titulo) { mensagemNaTela("mensagem-cotacao", "Informe o título do orçamento.", true); return; }
+  if (!comoRascunho && (!prazoTexto || produtoIds.length === 0 || fornecedorIds.length === 0)) {
+    mensagemNaTela("mensagem-cotacao", "Para enviar, informe prazo, produtos e pelo menos um vendedor.", true); return;
   }
-  const prazo = new Date(prazoTexto);
-  if (Number.isNaN(prazo.getTime()) || prazo <= new Date()) {
-    mensagemNaTela("mensagem-cotacao", "O prazo precisa ser uma data futura.", true);
-    return;
+  const prazo = prazoTexto ? new Date(prazoTexto) : null;
+  if (prazoTexto && (Number.isNaN(prazo.getTime()) || (!comoRascunho && prazo <= new Date()))) {
+    mensagemNaTela("mensagem-cotacao", comoRascunho ? "Confira a data informada." : "O prazo precisa ser uma data futura.", true); return;
   }
-
-  botao.disabled = true;
-  botao.textContent = "CRIANDO...";
+  botao.disabled = true; const textoOriginal=botao.textContent; botao.textContent=comoRascunho?"SALVANDO...":"ENVIANDO...";
   try {
-    const [prodSnap, fornSnap] = await Promise.all([
-      getDocs(collection(db, "produtos")),
-      getDocs(collection(db, "fornecedores"))
-    ]);
-    const produtos = prodSnap.docs.filter(d => produtoIds.includes(d.id)).map(d => ({
-      produtoId: d.id, nome: d.data().nome || "", descricao: d.data().descricao || "", codigoBarras: d.data().codigoBarras || "", unidade: d.data().unidade || "UN",
-      quantidade: Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(d.id)}"]`)?.value || 1)
-    }));
-    // Ao convidar um vendedor, incluir todas as empresas ativas cadastradas
-    // por ele. Assim, a resposta pode alternar de empresa por produto.
-    const selecionados = fornSnap.docs.filter(d => fornecedorIds.includes(d.id) && d.data().ativo === true);
-    if (selecionados.length !== fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
-
-    const titularesConvidados = new Set(selecionados.map(d => d.data().responsavelUid).filter(Boolean));
-    const fornecedores = fornSnap.docs.filter(d =>
-      d.data().ativo === true && titularesConvidados.has(d.data().responsavelUid)
-    );
-
-    const cotacaoRef = doc(collection(db, "cotacoes"));
-    const responsaveisUids = [...new Set(fornecedores.map(f => f.data().responsavelUid).filter(Boolean))];
-    const lote = writeBatch(db);
-    lote.set(cotacaoRef, {
-      titulo, descricao, prazo: prazo.toISOString(), produtos, responsaveisUids,
-      status: "aberta", criadoEm: serverTimestamp(),
-      criadoPor: auth.currentUser?.uid || ""
-    });
-    fornecedores.forEach(f => {
-      const dados = f.data();
-      const vinculoRef = doc(db, "cotacao_fornecedores", cotacaoRef.id + "__" + f.id);
-      lote.set(vinculoRef, {
-        cotacaoId: cotacaoRef.id, fornecedorId: f.id,
-        responsavelUid: dados.responsavelUid || "",
-        status: "convidado", criadoEm: serverTimestamp()
-      });
-    });
-    await lote.commit();
-    document.getElementById("form-cotacao").reset();
-    produtosSelecionadosCotacao = new Map();
-    document.getElementById("form-cotacao-area").style.display = "none";
-    mensagemNaTela("mensagem-cotacao", "Cotação criada e enviada aos fornecedores!");
+    const [prodSnap, fornSnap] = await Promise.all([getDocs(collection(db,"produtos")),getDocs(collection(db,"fornecedores"))]);
+    const produtos = produtoIds.map(id=>{const d=prodSnap.docs.find(x=>x.id===id);if(!d)return null;const data=d.data();return {produtoId:id,nome:data.nome||"",descricao:data.descricao||"",codigoBarras:data.codigoBarras||"",unidade:data.unidade||"UN",quantidade:Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(id)}"]`)?.value||1)};}).filter(Boolean);
+    if (produtos.some(p=>!(p.quantidade>0))) throw new Error("QUANTIDADE_INVALIDA");
+    const selecionados = fornSnap.docs.filter(d=>fornecedorIds.includes(d.id)&&d.data().ativo===true);
+    if (!comoRascunho && selecionados.length!==fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
+    const titulares = new Set(selecionados.map(d=>d.data().responsavelUid).filter(Boolean));
+    const fornecedores = fornSnap.docs.filter(d=>d.data().ativo===true&&titulares.has(d.data().responsavelUid));
+    const payload={titulo,descricao,prazo:prazo?prazo.toISOString():"",produtos,fornecedoresSelecionadosIds:fornecedorIds,status:comoRascunho?"rascunho":"aberta",criadoPor:auth.currentUser?.uid||"",atualizadoEm:serverTimestamp()};
+    if (comoRascunho) {
+      if (cotacaoRascunhoEditandoId) await updateDoc(doc(db,"cotacoes",cotacaoRascunhoEditandoId),payload);
+      else { const ref=doc(collection(db,"cotacoes")); await setDoc(ref,{...payload,criadoEm:serverTimestamp(),responsaveisUids:[]}); cotacaoRascunhoEditandoId=ref.id; }
+      mensagemNaTela("mensagem-cotacao","Rascunho salvo. Você pode fechar e continuar editando depois.");
+    } else {
+      const cotacaoRef=cotacaoRascunhoEditandoId?doc(db,"cotacoes",cotacaoRascunhoEditandoId):doc(collection(db,"cotacoes"));
+      const responsaveisUids=[...new Set(fornecedores.map(f=>f.data().responsavelUid).filter(Boolean))];
+      const lote=writeBatch(db);
+      lote.set(cotacaoRef,{...payload,responsaveisUids,enviadoEm:serverTimestamp(),...(cotacaoRascunhoEditandoId?{}:{criadoEm:serverTimestamp()})},{merge:true});
+      fornecedores.forEach(f=>{const dados=f.data();const vinculoRef=doc(db,"cotacao_fornecedores",cotacaoRef.id+"__"+f.id);lote.set(vinculoRef,{cotacaoId:cotacaoRef.id,fornecedorId:f.id,responsavelUid:dados.responsavelUid||"",status:"convidado",criadoEm:serverTimestamp()});});
+      await lote.commit();
+      mensagemNaTela("mensagem-cotacao","Orçamento enviado aos vendedores com sucesso!");
+      cotacaoRascunhoEditandoId=null;
+    }
+    if(!comoRascunho){document.getElementById("form-cotacao").reset();produtosSelecionadosCotacao=new Map();document.getElementById("form-cotacao-area").style.display="none";}
     await carregarListaCotacoesAdmin();
-  } catch (erro) {
-    console.error("Erro ao criar cotação:", erro);
-    mensagemNaTela("mensagem-cotacao",
-      erro.message === "FORNECEDOR_INATIVO" ? "Um dos fornecedores selecionados está bloqueado." : "Não foi possível criar a cotação. Verifique as regras do Firebase.", true);
-  } finally {
-    botao.disabled = false;
-    botao.textContent = "CRIAR COTAÇÃO";
-  }
+  } catch(e) { console.error(e); const msg={FORNECEDOR_INATIVO:"Um dos vendedores selecionados está bloqueado.",QUANTIDADE_INVALIDA:"Confira a quantidade dos produtos."}[e.message]||"Não foi possível salvar o orçamento. Verifique as regras atuais do Firebase.";mensagemNaTela("mensagem-cotacao",msg,true); }
+  finally {botao.disabled=false;botao.textContent=textoOriginal;}
 }
+
+async function editarRascunhoCotacao(id) {
+  try {
+    const snap=await getDoc(doc(db,"cotacoes",id)); if(!snap.exists()||snap.data().status!=="rascunho")throw new Error("Este rascunho não está mais disponível.");
+    const c=snap.data(); cotacaoRascunhoEditandoId=id;
+    document.getElementById("form-cotacao-area").style.display="block";
+    await carregarOpcoesCotacao();
+    document.getElementById("cotacao-titulo").value=c.titulo||"";
+    document.getElementById("cotacao-descricao").value=c.descricao||"";
+    document.getElementById("cotacao-prazo").value=c.prazo?new Date(c.prazo).toISOString().slice(0,16):"";
+    produtosSelecionadosCotacao=new Map();
+    (c.produtos||[]).forEach(p=>{const original=produtosDisponiveisCotacao.find(x=>x.id===p.produtoId);if(original)produtosSelecionadosCotacao.set(p.produtoId,original);});
+    renderizarProdutosSelecionadosCotacao();
+    (c.produtos||[]).forEach(p=>{const input=document.querySelector(`[data-qtd-cotacao="${CSS.escape(p.produtoId)}"]`);if(input)input.value=p.quantidade||1;});
+    const selecionados=new Set(c.fornecedoresSelecionadosIds||[]);
+    document.querySelectorAll('input[name="cotacao-fornecedor"]').forEach(x=>x.checked=selecionados.has(x.value));
+    document.getElementById("salvar-cotacao").textContent="ENVIAR AOS VENDEDORES";
+    document.getElementById("form-cotacao-area").scrollIntoView({behavior:"smooth",block:"start"});
+  } catch(e){console.error(e);alert(e.message||"Não foi possível abrir o rascunho.");}
+}
+
+function visualizarOrcamentoOnline(){
+  const titulo=document.getElementById("cotacao-titulo").value.trim()||"Orçamento de compras";
+  const descricao=document.getElementById("cotacao-descricao").value.trim();
+  const prazo=document.getElementById("cotacao-prazo").value;
+  const produtos=[...document.querySelectorAll('input[name="cotacao-produto"]:checked')].map(x=>{const p=produtosDisponiveisCotacao.find(y=>y.id===x.value);return p?{...p,quantidade:Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(x.value)}"]`)?.value||1)}:null;}).filter(Boolean);
+  const w=window.open("","_blank");if(!w){alert("Permita pop-ups para visualizar o orçamento.");return;}
+  w.document.write(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(titulo)}</title><style>body{font:14px Arial;color:#252a31;margin:35px}header{border-bottom:5px solid #f2c928;padding-bottom:16px}h1{margin:0 0 5px}table{width:100%;border-collapse:collapse;margin-top:24px}th,td{padding:11px;border:1px solid #ddd;text-align:left}th{background:#fff5cc}.meta{margin-top:18px;color:#555}.acoes{margin-top:24px}@media print{.acoes{display:none}}</style><header><h1>COMPRAS SANTA RITA</h1><h2>${escaparHTML(titulo)}</h2></header><div class="meta">Prazo para resposta: ${prazo?new Date(prazo).toLocaleString("pt-BR"):"A definir"}</div>${descricao?`<p><b>Orientações:</b> ${escaparHTML(descricao)}</p>`:""}<table><thead><tr><th>Item</th><th>Produto</th><th>Código de barras</th><th>Unidade</th><th>Quantidade</th></tr></thead><tbody>${produtos.map((p,i)=>`<tr><td>${i+1}</td><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td></tr>`).join("")}</tbody></table><div class="acoes"><button onclick="print()">Imprimir / Salvar PDF</button></div></html>`);w.document.close();
+}
+
 
 async function carregarListaCotacoesAdmin() {
  const area=document.getElementById("lista-cotacoes-admin");if(!area)return;
  try{const [snap,ps]=await Promise.all([getDocs(collection(db,"cotacoes")),getDocs(collection(db,"cotacoes_presenciais"))]);
  cotacoesAdminCache=[...snap.docs.map(d=>({id:d.id,...d.data(),tipoLista:"online"})),...ps.docs.map(d=>({id:d.id,...d.data(),tipoLista:"presencial"}))].sort((a,b)=>(b.criadoEm?.seconds||0)-(a.criadoEm?.seconds||0));paginaCotacoesAtual=1;
  area.innerHTML=`<div class="filtro-cotacoes"><button type="button" id="migrar-acessos-cotacoes">ATUALIZAR ACESSO DOS FORNECEDORES</button><label>Filtrar por data <input type="date" id="filtro-data-cotacoes"></label><button type="button" id="limpar-filtro-cotacoes">LIMPAR</button></div><div id="cotacoes-pagina"></div><div class="paginacao-cotacoes"><button type="button" id="cotacoes-anterior">ANTERIOR</button><span id="cotacoes-pagina-info"></span><button type="button" id="cotacoes-proxima">PRÓXIMA</button></div>`;
- const render=()=>{const data=document.getElementById("filtro-data-cotacoes")?.value||"";const lista=cotacoesAdminCache.filter(c=>!data||String(c.data||c.criadoEm?.toDate?.().toLocaleDateString("en-CA")||"").slice(0,10)===data);const paginas=Math.max(1,Math.ceil(lista.length/4));paginaCotacoesAtual=Math.min(paginaCotacoesAtual,paginas);const vis=lista.slice((paginaCotacoesAtual-1)*4,paginaCotacoesAtual*4);document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-presencial="${escaparHTML(c.id)}">BAIXAR IMAGEM</button><button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="aberta"?"Aberta":"Encerrada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-online="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button></div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação encontrada nesta data.</div>';document.getElementById("cotacoes-pagina-info").textContent=`Página ${paginaCotacoesAtual} de ${paginas} · ${lista.length} cotações`;document.getElementById("cotacoes-anterior").disabled=paginaCotacoesAtual===1;document.getElementById("cotacoes-proxima").disabled=paginaCotacoesAtual>=paginas;
- document.querySelectorAll("[data-detalhes-presencial]").forEach(b=>b.onclick=()=>abrirDetalhesPresencial(b.dataset.detalhesPresencial));document.querySelectorAll("[data-encerrar-cotacao]").forEach(b=>b.onclick=async()=>{if(confirm("Deseja encerrar esta cotação?")){await updateDoc(doc(db,"cotacoes",b.dataset.encerrarCotacao),{status:"encerrada"});await carregarListaCotacoesAdmin();}});
+ const render=()=>{const data=document.getElementById("filtro-data-cotacoes")?.value||"";const lista=cotacoesAdminCache.filter(c=>!data||String(c.data||c.criadoEm?.toDate?.().toLocaleDateString("en-CA")||"").slice(0,10)===data);const paginas=Math.max(1,Math.ceil(lista.length/4));paginaCotacoesAtual=Math.min(paginaCotacoesAtual,paginas);const vis=lista.slice((paginaCotacoesAtual-1)*4,paginaCotacoesAtual*4);document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-presencial="${escaparHTML(c.id)}">BAIXAR IMAGEM</button><button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="rascunho"?"Rascunho":c.status==="aberta"?"Aberta":"Encerrada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}${c.status==="rascunho"?`<button type="button" data-editar-rascunho="${escaparHTML(c.id)}">EDITAR RASCUNHO</button><button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`:`<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-online="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`}</div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação encontrada nesta data.</div>';document.getElementById("cotacoes-pagina-info").textContent=`Página ${paginaCotacoesAtual} de ${paginas} · ${lista.length} cotações`;document.getElementById("cotacoes-anterior").disabled=paginaCotacoesAtual===1;document.getElementById("cotacoes-proxima").disabled=paginaCotacoesAtual>=paginas;
+ document.querySelectorAll("[data-detalhes-presencial]").forEach(b=>b.onclick=()=>abrirDetalhesPresencial(b.dataset.detalhesPresencial));document.querySelectorAll("[data-editar-rascunho]").forEach(b=>b.onclick=()=>editarRascunhoCotacao(b.dataset.editarRascunho));document.querySelectorAll("[data-encerrar-cotacao]").forEach(b=>b.onclick=async()=>{if(confirm("Deseja encerrar esta cotação?")){await updateDoc(doc(db,"cotacoes",b.dataset.encerrarCotacao),{status:"encerrada"});await carregarListaCotacoesAdmin();}});
  document.querySelectorAll("[data-excluir-online]").forEach(b=>b.onclick=()=>excluirCotacaoOnline(b.dataset.excluirOnline));document.querySelectorAll("[data-excluir-presencial]").forEach(b=>b.onclick=async()=>{if(!confirm("Excluir permanentemente esta cotação presencial?"))return;try{await deleteDoc(doc(db,"cotacoes_presenciais",b.dataset.excluirPresencial));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir. Confira as regras do Firestore.");}});
  document.querySelectorAll("[data-exportar-online]").forEach(b=>b.onclick=()=>exportarCotacao("online",b.dataset.exportarOnline));document.querySelectorAll("[data-exportar-presencial]").forEach(b=>b.onclick=()=>exportarCotacao("presencial",b.dataset.exportarPresencial));document.querySelectorAll("[data-imagem-online]").forEach(b=>b.onclick=()=>baixarImagemCotacao("online",b.dataset.imagemOnline));document.querySelectorAll("[data-imagem-presencial]").forEach(b=>b.onclick=()=>baixarImagemCotacao("presencial",b.dataset.imagemPresencial));};
  document.getElementById("migrar-acessos-cotacoes").onclick=migrarAcessosCotacoes;document.getElementById("filtro-data-cotacoes").onchange=()=>{paginaCotacoesAtual=1;render();};document.getElementById("limpar-filtro-cotacoes").onclick=()=>{document.getElementById("filtro-data-cotacoes").value="";paginaCotacoesAtual=1;render();};document.getElementById("cotacoes-anterior").onclick=()=>{paginaCotacoesAtual--;render();};document.getElementById("cotacoes-proxima").onclick=()=>{paginaCotacoesAtual++;render();};render();
@@ -1534,8 +1543,8 @@ async function baixarImagemCotacao(tipo,id){
     ctx.font="18px Arial";ctx.fillText(`Tipo: ${presencial?"Presencial":"Online"}   Data: ${c.data||"—"}   Gerado: ${new Date().toLocaleString("pt-BR")}`,55,145);
     ctx.fillStyle="#f2c928";ctx.fillRect(50,175,canvas.width-100,42);
     ctx.fillStyle="#222";ctx.font="bold 17px Arial";
-    const cols=presencial?[55,470,850,970,1100,1280]:[55,570,930,1110];
-    const heads=presencial?["Produto","Empresa vencedora","Unidade","Qtd.","Preço vencedor","Total"]:["Produto","Código de barras","Unidade","Quantidade"];
+    const cols=presencial?[55,340,570,900,1000,1100,1320]:[55,570,930,1110];
+    const heads=presencial?["Produto","Código de barras","Empresa vencedora","Unidade","Qtd.","Preço vencedor","Total"]:["Produto","Código de barras","Unidade","Quantidade"];
     heads.forEach((h,i)=>ctx.fillText(h,cols[i],203));
     ctx.font="16px Arial";
     itens.forEach((it,i)=>{
@@ -1543,9 +1552,9 @@ async function baixarImagemCotacao(tipo,id){
       ctx.strokeStyle="#ddd";ctx.beginPath();ctx.moveTo(50,y-23);ctx.lineTo(canvas.width-50,y-23);ctx.stroke();
       const empresaVencedora=presencial?(c.fornecedores||[]).find(f=>f.fornecedorId===it.vencedorId):null;
       const vals=presencial
-        ?[it.nome,empresaVencedora?.empresa||empresaVencedora?.nome||"—",it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})]
+        ?[it.nome,it.codigoBarras||"—",empresaVencedora?.empresa||empresaVencedora?.nome||"—",it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})]
         :[it.nome,it.codigoBarras||"—",it.unidade||"UN",String(it.quantidade||1)];
-      vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===1?28:42),cols[j],y));
+      vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===2?28:presencial&&j===1?20:42),cols[j],y));
     });
     if(presencial){
       const y=altura-35;ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,y);
@@ -1567,11 +1576,11 @@ async function exportarCotacao(tipo,id){
     } else {
       linhas=(c.itens||[]).map(p=>{
         const vencedora=(c.fornecedores||[]).find(f=>f.fornecedorId===p.vencedorId);
-        return `<tr><td>${escaparHTML(p.nome)}</td><td><strong>${escaparHTML(vencedora?.empresa||vencedora?.nome||"—")}</strong></td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;
+        return `<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td><strong>${escaparHTML(vencedora?.empresa||vencedora?.nome||"—")}</strong></td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;
       }).join("");
     }
     const headers=presencial
-      ?"<th>Produto</th><th>Empresa vencedora</th><th>Un.</th><th>Qtd.</th><th>Preço vencedor</th><th>Total</th>"
+      ?"<th>Produto</th><th>Código de barras</th><th>Empresa vencedora</th><th>Un.</th><th>Qtd.</th><th>Preço vencedor</th><th>Total</th>"
       :"<th>Produto</th><th>Código de barras</th><th>Un.</th><th>Quantidade</th>";
     const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(c.titulo||"Cotação")}</title><style>
       body{font:14px Arial;padding:28px;color:#222}h1{color:#333}small{color:#555}
@@ -1622,34 +1631,26 @@ async function abrirModuloRespostas(conteudo) {
   }
 }
 
-async function carregarRespostasAdmin() {
-  const area = document.getElementById("lista-respostas-admin");
-  if (!area) return;
-  area.textContent = "Carregando respostas...";
-  try {
-    const filtro = document.getElementById("filtro-cotacao-respostas")?.value || "";
-    const snap = await getDocs(collection(db, "respostas"));
-    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => (!filtro || r.cotacaoId === filtro) && Array.isArray(r.itens) && r.itens.length > 0);
-    if (!respostas.length) { area.innerHTML = '<div class="aviso-modulo">Ainda não há respostas para esta seleção.</div>'; return; }
-    const enriquecidas = await Promise.all(respostas.map(async r => {
-      const [cot, forn, usuario] = await Promise.all([
-        getDoc(doc(db, "cotacoes", r.cotacaoId)), getDoc(doc(db, "fornecedores", r.fornecedorId)),
-        r.responsavelUid ? getDoc(doc(db,"usuarios",r.responsavelUid)) : Promise.resolve(null)
-      ]);
-      return { ...r, titulo: cot?.exists() ? cot.data().titulo : "Cotação", empresa: forn?.exists() ? forn.data().empresa : "Empresa removida", responsavel: usuario?.exists() ? usuario.data().nome : "" };
-    }));
-    area.innerHTML = enriquecidas.map(r => `
-      <div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(r.titulo)} — ${escaparHTML(r.empresa)}</strong>
-        ${r.responsavel ? `<p>Responsável: ${escaparHTML(r.responsavel)}</p>` : ""}
-        ${(r.itens || []).map(item => `<div style="border-top:1px solid #e5e5e5;padding:9px 0"><strong>${escaparHTML(item.nome)}</strong>
-          <p>${escaparHTML(item.descricao||"")}</p><p>Código: ${escaparHTML(item.codigoBarras||"—")} · Unidade: ${escaparHTML(item.unidade||"UN")} · Quantidade: ${Number(item.quantidade||1).toLocaleString("pt-BR")}</p>
-          ${item.indisponivel ? '<p><b>Produto indisponível</b></p>' : `<p>Preço unitário: ${Number(item.preco||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</p>`}
-          ${item.observacao ? `<p>Observação comercial: ${escaparHTML(item.observacao)}</p>` : ""}</div>`).join("")}
-        ${r.observacaoGeral ? `<p>Observação geral: ${escaparHTML(r.observacaoGeral)}</p>` : ""}
-        <p>Enviada: ${r.enviadoEm?.toDate ? r.enviadoEm.toDate().toLocaleString("pt-BR") : "—"}</p>
-      </div>`).join("");
-  } catch (erro) { console.error(erro); area.textContent = "Não foi possível carregar as respostas."; }
+async function carregarRespostasAdmin(){
+ const area=document.getElementById("lista-respostas-admin");if(!area)return;area.textContent="Carregando comparação de ofertas...";
+ try{
+  const filtro=document.getElementById("filtro-cotacao-respostas")?.value||"";
+  const [cotSnap,resSnap,fornSnap]=await Promise.all([getDocs(collection(db,"cotacoes")),getDocs(collection(db,"respostas")),getDocs(collection(db,"fornecedores"))]);
+  const cotacoes=new Map(cotSnap.docs.map(d=>[d.id,{id:d.id,...d.data()}]));
+  const fornecedores=new Map(fornSnap.docs.map(d=>[d.id,d.data()]));
+  const respostas=resSnap.docs.map(d=>d.data()).filter(r=>(!filtro||r.cotacaoId===filtro)&&Array.isArray(r.itens)&&r.itens.length>0);
+  const grupos=new Map();respostas.forEach(r=>{if(!grupos.has(r.cotacaoId))grupos.set(r.cotacaoId,[]);grupos.get(r.cotacaoId).push(r);});
+  const ids=filtro?[filtro]:[...grupos.keys()];const blocos=[];
+  for(const id of ids){const c=cotacoes.get(id);if(!c)continue;const rs=grupos.get(id)||[];if(!rs.length)continue;
+   const empresas=rs.map(r=>({id:r.fornecedorId,nome:fornecedores.get(r.fornecedorId)?.empresa||"Empresa removida",itens:r.itens||[],geral:r.observacaoGeral||""}));
+   const produtos=c.produtos||[];
+   const linhas=produtos.map((p,i)=>{const celulas=empresas.map(e=>{const it=e.itens.find(x=>Number(x.indiceProduto)===i);if(!it)return `<td class="comparacao-vazia">—</td>`;return `<td><strong>${it.indisponivel?"Não fornece":Number(it.preco||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</strong>${it.observacao?`<small>${escaparHTML(it.observacao)}</small>`:""}</td>`;}).join("");return `<tr><th scope="row"><strong>${escaparHTML(p.nome)}</strong><small>Código: ${escaparHTML(p.codigoBarras||"—")} · ${Number(p.quantidade||1)} ${escaparHTML(p.unidade||"UN")}</small></th>${celulas}</tr>`;}).join("");
+   blocos.push(`<section class="comparacao-cotacao"><h3>${escaparHTML(c.titulo||"Cotação")}</h3><p class="comparacao-meta">${produtos.length} produtos · Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p><div class="comparacao-tabela-wrap"><table class="comparacao-tabela"><thead><tr><th>Produto</th>${empresas.map(e=>`<th>${escaparHTML(e.nome)}</th>`).join("")}</tr></thead><tbody>${linhas}</tbody></table></div>${empresas.filter(e=>e.geral).map(e=>`<p class="comparacao-observacao"><b>${escaparHTML(e.nome)}:</b> ${escaparHTML(e.geral)}</p>`).join("")}</section>`);
+  }
+  area.innerHTML=blocos.join("")||'<div class="aviso-modulo">Ainda não há propostas para comparar nesta seleção.</div>';
+ }catch(e){console.error(e);area.textContent="Não foi possível carregar a comparação de ofertas.";}
 }
+
 
 // MÓDULO DE USUÁRIOS
 
@@ -1778,332 +1779,44 @@ async function carregarCotacoesFornecedor(uid) {
 }
 
 async function abrirFormularioResposta(cotacaoId) {
-  const area = document.getElementById("form-resposta-fornecedor");
-  if (!area) return;
-  try {
-    const uid = auth.currentUser?.uid;
-    if (!uid) throw new Error("Faça login novamente para responder.");
-
-    const snap = await getDoc(doc(db, "cotacoes", cotacaoId));
-    if (!snap.exists()) throw new Error("Cotação não encontrada.");
-    const cot = snap.data();
-    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) {
-      alert("O prazo desta cotação terminou.");
-      return;
-    }
-
-    // Recupera todas as empresas vinculadas a este vendedor para esta cotação.
-    const vinculosSnap = await getDocs(query(
-      collection(db, "cotacao_fornecedores"),
-      where("responsavelUid", "==", uid)
-    ));
-    const vinculos = vinculosSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(v => v.cotacaoId === cotacaoId);
-
-    if (!vinculos.length) throw new Error("Nenhuma empresa sua está vinculada a esta cotação.");
-
-    const empresas = (await Promise.all(vinculos.map(async v => {
-      const [fornSnap, respostaSnap] = await Promise.all([
-        getDoc(doc(db, "fornecedores", v.fornecedorId)),
-        getDoc(doc(db, "respostas", cotacaoId + "__" + v.fornecedorId))
-      ]);
-      if (!fornSnap.exists() || fornSnap.data().ativo !== true) return null;
-      return {
-        fornecedorId: v.fornecedorId,
-        vinculoId: v.id,
-        empresa: fornSnap.data().empresa || "Empresa sem nome",
-        resposta: respostaSnap.exists() ? respostaSnap.data() : null
-      };
-    }))).filter(Boolean);
-
-    if (!empresas.length) throw new Error("Não encontramos empresas ativas para esta cotação.");
-
-    const produtos = cot.produtos || [];
-    area.style.display = "block";
-    area.dataset.cotacaoId = cotacaoId;
-    area.innerHTML = `
-      <section class="resposta-online-shell">
-        <div class="resposta-online-header">
-          <button type="button" class="resposta-fechar" id="cancelar-resposta" aria-label="Fechar">×</button>
-          <span class="resposta-online-eyebrow">PROPOSTA COMERCIAL</span>
-          <h3>${escaparHTML(cot.titulo || 'Cotação')}</h3>
-          <div class="resposta-empresa-destaque resposta-multiplas-empresas">
-            <span class="resposta-empresa-icone">▦</span>
-            <div><small>EMPRESAS QUE VOCÊ PODE UTILIZAR</small><strong>${empresas.map(e => escaparHTML(e.empresa)).join(' · ')}</strong></div>
-          </div>
-          <div class="resposta-online-metricas">
-            <span><b>${produtos.length}</b> produtos</span>
-            <span><b>${cot.prazo ? new Date(cot.prazo).toLocaleDateString('pt-BR') : '—'}</b> prazo final</span>
-          </div>
-        </div>
-        ${cot.descricao ? `<div class="resposta-orientacoes"><strong>Orientações do comprador</strong><p>${escaparHTML(cot.descricao)}</p></div>` : ''}
-        <div class="resposta-escolha-explicacao">
-          <strong>Escolha por produto</strong>
-          <span>Em cada item, selecione qual das suas empresas fará a oferta. Você pode alternar entre elas na mesma cotação.</span>
-        </div>
-        <form id="form-resposta" class="resposta-online-form">
-          <div class="resposta-lista-cabecalho">
-            <div><span class="resposta-online-eyebrow">ITENS DA COTAÇÃO</span><h4>Informe seus preços</h4></div>
-            <span id="resposta-progresso-texto" class="resposta-progresso-texto"></span>
-          </div>
-          <div class="resposta-progresso-trilho"><span id="resposta-progresso-barra"></span></div>
-          <div id="resposta-itens-pagina"></div>
-          <div class="paginacao-resposta resposta-paginacao-nova">
-            <button type="button" id="resposta-anterior">← Anterior</button>
-            <span id="resposta-pagina-info"></span>
-            <button type="button" id="resposta-proxima">Próxima →</button>
-          </div>
-          <section class="resposta-observacao-geral">
-            <label for="resposta-observacao-geral">Condições comerciais gerais <small>(opcional)</small></label>
-            <textarea id="resposta-observacao-geral" rows="3" placeholder="Ex.: prazo de entrega, forma de pagamento, validade da proposta..."></textarea>
-          </section>
-          <div class="resposta-acoes-finais">
-            <button type="submit" id="enviar-resposta" class="resposta-enviar-btn">ENVIAR PROPOSTA</button>
-            <p id="mensagem-resposta" role="status"></p>
-            <small>O sistema separará automaticamente os produtos por empresa ao enviar. Você poderá revisar a proposta enquanto a cotação estiver aberta.</small>
-          </div>
-        </form>
-      </section>`;
-
-    const porPagina = 5;
-    let pagina = 0;
-    const total = produtos.length;
-    const rascunho = new Map();
-
-    // Aproveita os dados já enviados anteriormente, mantendo a empresa e o preço mais recentes por produto.
-    const respostasOrdenadas = empresas
-      .filter(e => e.resposta)
-      .sort((a, b) => {
-        const ta = a.resposta.enviadoEm?.toMillis ? a.resposta.enviadoEm.toMillis() : 0;
-        const tb = b.resposta.enviadoEm?.toMillis ? b.resposta.enviadoEm.toMillis() : 0;
-        return tb - ta;
-      });
-
-    respostasOrdenadas.forEach(e => {
-      (e.resposta.itens || []).forEach((it, pos) => {
-        const indice = Number.isInteger(it.indiceProduto) ? it.indiceProduto : pos;
-        if (!rascunho.has(indice)) {
-          rascunho.set(indice, {
-            fornecedorId: e.fornecedorId,
-            indisponivel: !!it.indisponivel,
-            preco: it.preco == null ? '' : String(it.preco),
-            observacao: it.observacao || ''
-          });
-        }
-      });
-    });
-
-    area._rascunho = rascunho;
-    area._empresas = empresas;
-
-    const guardarPagina = () => {
-      area.querySelectorAll('[data-resposta-item]').forEach(bloco => {
-        const n = Number(bloco.dataset.respostaItem);
-        rascunho.set(n, {
-          fornecedorId: bloco.querySelector(`[name="empresa-${n}"]`)?.value || '',
-          indisponivel: !!bloco.querySelector('.item-indisponivel')?.checked,
-          preco: bloco.querySelector(`[name="preco-${n}"]`)?.value || '',
-          observacao: bloco.querySelector(`[name="obs-${n}"]`)?.value || ''
-        });
-      });
-    };
-
-    const atualizarProgresso = () => {
-      const preenchidos = produtos.reduce((s, _, i) => {
-        const d = rascunho.get(i);
-        return s + (d?.fornecedorId && (d.indisponivel || Number(d.preco) > 0) ? 1 : 0);
-      }, 0);
-      const texto = document.getElementById('resposta-progresso-texto');
-      const barra = document.getElementById('resposta-progresso-barra');
-      if (texto) texto.textContent = `${preenchidos} de ${total} preenchidos`;
-      if (barra) barra.style.width = `${total ? preenchidos / total * 100 : 0}%`;
-    };
-
-    const render = () => {
-      const inicio = pagina * porPagina;
-      const paginaProdutos = produtos.slice(inicio, inicio + porPagina);
-      document.getElementById('resposta-itens-pagina').innerHTML = paginaProdutos.map((p, i) => {
-        const n = inicio + i;
-        const d = rascunho.get(n) || {};
-        const opcoes = empresas.map(e =>
-          `<option value="${escaparHTML(e.fornecedorId)}" ${d.fornecedorId === e.fornecedorId ? 'selected' : ''}>${escaparHTML(e.empresa)}</option>`
-        ).join('');
-        return `<article class="resposta-produto-card" data-resposta-item="${n}">
-          <div class="resposta-produto-topo">
-            <span class="resposta-produto-numero">${String(n + 1).padStart(2, '0')}</span>
-            <span class="resposta-produto-unidade">${escaparHTML(p.unidade || 'UN')}</span>
-          </div>
-          <h5>${escaparHTML(p.nome || 'Produto sem nome')}</h5>
-          ${p.descricao ? `<p class="resposta-produto-descricao">${escaparHTML(p.descricao)}</p>` : ''}
-          <div class="resposta-produto-detalhes">
-            <span><small>CÓDIGO DE BARRAS</small><b>${escaparHTML(p.codigoBarras || 'Não informado')}</b></span>
-            <span><small>QUANTIDADE SOLICITADA</small><b>${Number(p.quantidade || 1).toLocaleString('pt-BR')} ${escaparHTML(p.unidade || 'UN')}</b></span>
-          </div>
-          <label class="resposta-empresa-produto-label" for="empresa-${n}">EMPRESA QUE FARÁ A OFERTA</label>
-          <select id="empresa-${n}" name="empresa-${n}" class="resposta-empresa-produto" required>
-            <option value="">Selecione a empresa para este produto</option>
-            ${opcoes}
-          </select>
-          <label class="resposta-preco-label" for="preco-${n}">Preço unitário <span>R$</span></label>
-          <div class="resposta-preco-wrap"><span>R$</span><input id="preco-${n}" name="preco-${n}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" value="${escaparHTML(d.preco || '')}" ${d.indisponivel ? 'disabled' : ''}></div>
-          <label class="resposta-indisponivel">
-            <input type="checkbox" name="indisponivel-${n}" class="item-indisponivel" ${d.indisponivel ? 'checked' : ''}>
-            <span><b>Esta empresa não fornece este produto</b><small>Marque somente se a empresa selecionada não puder fornecer o item.</small></span>
-          </label>
-          <label class="resposta-observacao-label" for="obs-${n}">Observação sobre este produto <small>(opcional)</small></label>
-          <input id="obs-${n}" name="obs-${n}" class="resposta-observacao-input" placeholder="Marca, validade, bonificação..." value="${escaparHTML(d.observacao || '')}">
-        </article>`;
-      }).join('');
-
-      document.getElementById('resposta-pagina-info').textContent =
-        `${inicio + 1}–${Math.min(inicio + porPagina, total)} de ${total} produtos`;
-      document.getElementById('resposta-anterior').disabled = pagina === 0;
-      document.getElementById('resposta-proxima').disabled = (pagina + 1) * porPagina >= total;
-
-      area.querySelectorAll('.item-indisponivel').forEach(chk => chk.addEventListener('change', () => {
-        const bloco = chk.closest('[data-resposta-item]');
-        const n = Number(bloco.dataset.respostaItem);
-        const preco = bloco.querySelector(`[name="preco-${n}"]`);
-        preco.disabled = chk.checked;
-        if (chk.checked) preco.value = '';
-        guardarPagina();
-        atualizarProgresso();
-      }));
-
-      area.querySelectorAll('[data-resposta-item] input').forEach(input =>
-        input.addEventListener('input', () => { guardarPagina(); atualizarProgresso(); })
-      );
-      area.querySelectorAll('[data-resposta-item] select').forEach(select =>
-        select.addEventListener('change', () => { guardarPagina(); atualizarProgresso(); })
-      );
-      atualizarProgresso();
-    };
-
-    document.getElementById('resposta-anterior').onclick = () => { guardarPagina(); pagina--; render(); };
-    document.getElementById('resposta-proxima').onclick = () => { guardarPagina(); pagina++; render(); };
-    document.getElementById('cancelar-resposta').onclick = () => { area.style.display = 'none'; area.innerHTML = ''; };
-    render();
-    document.getElementById('form-resposta').addEventListener('submit', enviarRespostaFornecedor);
-    area.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (erro) {
-    console.error("Falha ao abrir formulário da cotação:", { code: erro?.code, message: erro?.message, cotacaoId });
-    const detalhe = erro?.code ? ` (${erro.code})` : '';
-    alert(`Não foi possível abrir esta cotação${detalhe}. ${erro?.message || 'Verifique o acesso às empresas desta cotação.'}`);
-  }
+  const area=document.getElementById("form-resposta-fornecedor");if(!area)return;
+  try{
+    const uid=auth.currentUser?.uid;if(!uid)throw new Error("Faça login novamente para responder.");
+    const snap=await getDoc(doc(db,"cotacoes",cotacaoId));if(!snap.exists())throw new Error("Cotação não encontrada.");
+    const cot=snap.data();if(cot.status!=="aberta"||(cot.prazo&&new Date(cot.prazo)<=new Date())){alert("O prazo desta cotação terminou.");return;}
+    const vinculosSnap=await getDocs(query(collection(db,"cotacao_fornecedores"),where("responsavelUid","==",uid)));
+    const vinculos=vinculosSnap.docs.map(d=>({id:d.id,...d.data()})).filter(v=>v.cotacaoId===cotacaoId);
+    if(!vinculos.length)throw new Error("Nenhuma empresa sua está vinculada a esta cotação.");
+    const empresas=(await Promise.all(vinculos.map(async v=>{const [fs,rs]=await Promise.all([getDoc(doc(db,"fornecedores",v.fornecedorId)),getDoc(doc(db,"respostas",cotacaoId+"__"+v.fornecedorId))]);if(!fs.exists()||fs.data().ativo!==true)return null;return{fornecedorId:v.fornecedorId,vinculoId:v.id,empresa:fs.data().empresa||"Empresa sem nome",resposta:rs.exists()?rs.data():null};}))).filter(Boolean);
+    if(!empresas.length)throw new Error("Não encontramos empresas ativas para esta cotação.");
+    const produtos=cot.produtos||[];const dados=new Map();
+    empresas.forEach(e=>(e.resposta?.itens||[]).forEach(it=>{const i=Number(it.indiceProduto);if(!dados.has(i))dados.set(i,[]);dados.get(i).push({fornecedorId:e.fornecedorId,indisponivel:!!it.indisponivel,preco:it.preco==null?"":String(it.preco),observacao:it.observacao||""});}));
+    const geral=empresas.find(e=>e.resposta?.observacaoGeral)?.resposta?.observacaoGeral||"";
+    area.style.display="block";area.dataset.cotacaoId=cotacaoId;area._empresas=empresas;area._rascunho=dados;
+    area.innerHTML=`<section class="resposta-online-shell"><div class="resposta-online-header"><button type="button" class="resposta-fechar" id="cancelar-resposta">×</button><span class="resposta-online-eyebrow">ORÇAMENTO PARA PREENCHIMENTO</span><h3>${escaparHTML(cot.titulo||"Cotação")}</h3><div class="resposta-online-metricas"><span><b>${produtos.length}</b> produtos</span><span><b>${cot.prazo?new Date(cot.prazo).toLocaleDateString("pt-BR"):"—"}</b> prazo final</span></div></div>${cot.descricao?`<div class="resposta-orientacoes"><strong>Orientações do comprador</strong><p>${escaparHTML(cot.descricao)}</p></div>`:""}<form id="form-resposta" class="resposta-online-form"><div class="resposta-lista-cabecalho"><div><span class="resposta-online-eyebrow">ITENS DO ORÇAMENTO</span><h4>Informe até duas ofertas por produto</h4></div><span id="resposta-progresso-texto"></span></div><div class="resposta-progresso-trilho"><span id="resposta-progresso-barra"></span></div><div id="resposta-itens-pagina"></div><div class="paginacao-resposta"><button type="button" id="resposta-anterior">← Anterior</button><span id="resposta-pagina-info"></span><button type="button" id="resposta-proxima">Próxima →</button></div><label>Condições comerciais gerais (opcional)<textarea id="resposta-observacao-geral" rows="3" placeholder="Prazo de entrega, pagamento, validade..."></textarea></label><button type="submit" id="enviar-resposta" class="resposta-enviar-btn">ENVIAR ORÇAMENTO</button><p id="mensagem-resposta" role="status"></p></form></section>`;
+    document.getElementById("resposta-observacao-geral").value=geral;
+    const porPagina=4;let pagina=0;const total=produtos.length;
+    const guardar=()=>area.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);const ofertas=[0,1].map(k=>({fornecedorId:bloco.querySelector(`[name="empresa-${n}-${k}"]`)?.value||"",indisponivel:!!bloco.querySelector(`[name="indisponivel-${n}-${k}"]`)?.checked,preco:bloco.querySelector(`[name="preco-${n}-${k}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}-${k}"]`)?.value||""}));dados.set(n,ofertas);});
+    const progresso=()=>{const preenchidos=produtos.reduce((acc,_,i)=>acc+((dados.get(i)||[]).some(o=>o.fornecedorId&&(o.indisponivel||Number(o.preco)>0))?1:0),0);document.getElementById("resposta-progresso-texto").textContent=`${preenchidos} de ${total} produtos`;document.getElementById("resposta-progresso-barra").style.width=`${total?preenchidos/total*100:0}%`;};
+    const render=()=>{const inicio=pagina*porPagina;document.getElementById("resposta-itens-pagina").innerHTML=produtos.slice(inicio,inicio+porPagina).map((p,i)=>{const n=inicio+i;const ofertas=dados.get(n)||[];return `<article class="resposta-produto-card" data-resposta-item="${n}"><div class="resposta-produto-topo"><span class="resposta-produto-numero">${String(n+1).padStart(2,"0")}</span><span>${escaparHTML(p.unidade||"UN")}</span></div><h5>${escaparHTML(p.nome||"Produto")}</h5><p>Código: ${escaparHTML(p.codigoBarras||"Não informado")} · Quantidade: ${Number(p.quantidade||1).toLocaleString("pt-BR")} ${escaparHTML(p.unidade||"UN")}</p>${[0,1].map(k=>{const d=ofertas[k]||{};return `<section class="oferta-vendedor-bloco"><h6>OFERTA ${k+1} ${k===1?"(OPCIONAL)":""}</h6><label>Empresa<select name="empresa-${n}-${k}"><option value="">${k===0?"Selecione a empresa":"Não adicionar segunda oferta"}</option>${empresas.map(e=>`<option value="${escaparHTML(e.fornecedorId)}" ${d.fornecedorId===e.fornecedorId?"selected":""}>${escaparHTML(e.empresa)}</option>`).join("")}</select></label><label>Preço unitário (R$)<input name="preco-${n}-${k}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" value="${escaparHTML(d.preco||"")}" ${d.indisponivel?"disabled":""}></label><label class="resposta-indisponivel"><input type="checkbox" name="indisponivel-${n}-${k}" ${d.indisponivel?"checked":""}><span>Esta empresa não tem o produto</span></label><label>Observação / bonificação<input name="obs-${n}-${k}" placeholder="Bonificação, marca, entrega..." value="${escaparHTML(d.observacao||"")}"></label></section>`;}).join("")}</article>`;}).join("");
+      document.getElementById("resposta-pagina-info").textContent=`${inicio+1}–${Math.min(inicio+porPagina,total)} de ${total}`;document.getElementById("resposta-anterior").disabled=pagina===0;document.getElementById("resposta-proxima").disabled=(pagina+1)*porPagina>=total;
+      area.querySelectorAll("[data-resposta-item] input, [data-resposta-item] select").forEach(el=>{el.addEventListener("input",()=>{guardar();progresso();});el.addEventListener("change",()=>{guardar();progresso();});});
+      area.querySelectorAll('[name^="indisponivel-"]').forEach(chk=>chk.addEventListener("change",()=>{const bloco=chk.closest("[data-resposta-item]");const n=Number(bloco.dataset.respostaItem);const k=chk.name.endsWith("-1")?1:0;const preco=bloco.querySelector(`[name="preco-${n}-${k}"]`);preco.disabled=chk.checked;if(chk.checked)preco.value="";guardar();progresso();}));progresso();};
+    document.getElementById("resposta-anterior").onclick=()=>{guardar();pagina--;render();};document.getElementById("resposta-proxima").onclick=()=>{guardar();pagina++;render();};document.getElementById("cancelar-resposta").onclick=()=>{area.style.display="none";area.innerHTML="";};render();document.getElementById("form-resposta").addEventListener("submit",enviarRespostaFornecedor);area.scrollIntoView({behavior:"smooth",block:"start"});
+  }catch(e){console.error(e);alert(`Não foi possível abrir esta cotação. ${e.message||"Verifique o acesso."}`);}
 }
 
-async function enviarRespostaFornecedor(evento) {
-  evento.preventDefault();
-  const area = document.getElementById("form-resposta-fornecedor");
-  const cotacaoId = area.dataset.cotacaoId;
-  const cotSnap = await getDoc(doc(db, "cotacoes", cotacaoId));
-  if (!cotSnap.exists() || cotSnap.data().status !== "aberta") {
-    mensagemNaTela("mensagem-resposta", "Esta cotação foi encerrada.", true);
-    return;
-  }
 
-  const cot = cotSnap.data();
-  area.querySelectorAll("[data-resposta-item]").forEach(bloco => {
-    const n = Number(bloco.dataset.respostaItem);
-    area._rascunho = area._rascunho || new Map();
-    area._rascunho.set(n, {
-      fornecedorId: bloco.querySelector(`[name="empresa-${n}"]`)?.value || '',
-      indisponivel: !!bloco.querySelector(".item-indisponivel")?.checked,
-      preco: bloco.querySelector(`[name="preco-${n}"]`)?.value || "",
-      observacao: bloco.querySelector(`[name="obs-${n}"]`)?.value || ""
-    });
-  });
-
-  const rascunho = area._rascunho || new Map();
-  const itens = (cot.produtos || []).map((p, i) => {
-    const d = rascunho.get(i) || {};
-    const indisponivel = !!d.indisponivel;
-    const preco = d.preco === "" ? null : Number(d.preco);
-    return {
-      indiceProduto: i,
-      fornecedorId: d.fornecedorId || "",
-      produtoId: p.produtoId,
-      nome: p.nome,
-      descricao: p.descricao || "",
-      codigoBarras: p.codigoBarras || "",
-      unidade: p.unidade || "UN",
-      quantidade: Number(p.quantidade || 1),
-      indisponivel,
-      preco,
-      observacao: String(d.observacao || "").trim()
-    };
-  });
-
-  if (itens.some(i => !i.fornecedorId)) {
-    mensagemNaTela("mensagem-resposta", "Selecione qual empresa fará a oferta de cada produto.", true);
-    return;
-  }
-  if (itens.some(i => !i.indisponivel && (!Number.isFinite(i.preco) || i.preco <= 0))) {
-    mensagemNaTela("mensagem-resposta", "Informe o preço ou marque que a empresa selecionada não fornece o produto.", true);
-    return;
-  }
-
-  const empresas = area._empresas || [];
-  const idsPermitidos = new Set(empresas.map(e => e.fornecedorId));
-  if (itens.some(i => !idsPermitidos.has(i.fornecedorId))) {
-    mensagemNaTela("mensagem-resposta", "Uma das empresas selecionadas não está vinculada a esta cotação. Atualize a página e tente novamente.", true);
-    return;
-  }
-
-  const observacaoGeral = document.getElementById("resposta-observacao-geral").value.trim();
-  const botao = document.getElementById("enviar-resposta");
-  botao.disabled = true;
-  botao.textContent = "ENVIANDO PROPOSTA...";
-
-  try {
-    const grupos = new Map();
-    empresas.forEach(e => grupos.set(e.fornecedorId, []));
-    itens.forEach(item => grupos.get(item.fornecedorId).push(item));
-
-    const batch = writeBatch(db);
-    let operacoes = 0;
-
-    for (const empresa of empresas) {
-      const fornecedorId = empresa.fornecedorId;
-      const itensDaEmpresa = grupos.get(fornecedorId) || [];
-      const respostaAnterior = empresa.resposta;
-      const respostaRef = doc(db, "respostas", cotacaoId + "__" + fornecedorId);
-
-      // Atualiza propostas anteriores mesmo quando o vendedor moveu todos os itens
-      // daquela empresa para outra, evitando preços antigos duplicados no comparativo.
-      if (itensDaEmpresa.length > 0 || respostaAnterior) {
-        batch.set(respostaRef, {
-          cotacaoId,
-          fornecedorId,
-          responsavelUid: auth.currentUser?.uid || "",
-          itens: itensDaEmpresa,
-          observacaoGeral,
-          enviadoEm: serverTimestamp()
-        });
-        operacoes++;
-      }
-
-      if (itensDaEmpresa.length > 0) {
-        batch.update(doc(db, "cotacao_fornecedores", empresa.vinculoId), { status: "respondido" });
-        operacoes++;
-      }
-    }
-
-    if (!operacoes) throw new Error("Nenhum produto foi atribuído às empresas.");
-    await batch.commit();
-
-    mensagemNaTela("mensagem-resposta", "Proposta enviada! Os produtos foram separados por empresa.");
-    area.style.display = "none";
-    area.innerHTML = "";
-    await carregarCotacoesFornecedor(auth.currentUser.uid);
-  } catch (erro) {
-    console.error("Erro ao enviar proposta dividida por empresa:", erro);
-    mensagemNaTela("mensagem-resposta", `Não foi possível enviar a proposta. ${erro?.code || erro?.message || "Verifique as regras do Firebase."}`, true);
-    botao.disabled = false;
-    botao.textContent = "ENVIAR PROPOSTA";
-  }
+async function enviarRespostaFornecedor(evento){
+  evento.preventDefault();const area=document.getElementById("form-resposta-fornecedor");const cotacaoId=area.dataset.cotacaoId;const cotSnap=await getDoc(doc(db,"cotacoes",cotacaoId));if(!cotSnap.exists()||cotSnap.data().status!=="aberta"){mensagemNaTela("mensagem-resposta","Esta cotação foi encerrada.",true);return;}
+  area.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);area._rascunho.set(n,[0,1].map(k=>({fornecedorId:bloco.querySelector(`[name="empresa-${n}-${k}"]`)?.value||"",indisponivel:!!bloco.querySelector(`[name="indisponivel-${n}-${k}"]`)?.checked,preco:bloco.querySelector(`[name="preco-${n}-${k}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}-${k}"]`)?.value||""})));});
+  const cot=cotSnap.data(),empresas=area._empresas||[],ids=new Set(empresas.map(e=>e.fornecedorId)),porEmpresa=new Map(empresas.map(e=>[e.fornecedorId,[]]));
+  for(let i=0;i<(cot.produtos||[]).length;i++){const p=cot.produtos[i],ofertas=area._rascunho.get(i)||[];const vistos=new Set();for(const o of ofertas){if(!o.fornecedorId){if(o.preco||o.indisponivel||o.observacao.trim()){mensagemNaTela("mensagem-resposta","Selecione a empresa para cada oferta preenchida.",true);return;}continue;}if(!ids.has(o.fornecedorId)||vistos.has(o.fornecedorId)){mensagemNaTela("mensagem-resposta","Escolha empresas diferentes nas duas ofertas.",true);return;}vistos.add(o.fornecedorId);const preco=o.preco===""?null:Number(o.preco);if(!o.indisponivel&&(!Number.isFinite(preco)||preco<=0)){mensagemNaTela("mensagem-resposta","Informe o preço ou marque que a empresa não tem o produto.",true);return;}porEmpresa.get(o.fornecedorId).push({indiceProduto:i,produtoId:p.produtoId,nome:p.nome,descricao:p.descricao||"",codigoBarras:p.codigoBarras||"",unidade:p.unidade||"UN",quantidade:Number(p.quantidade||1),indisponivel:!!o.indisponivel,preco:o.indisponivel?null:preco,observacao:String(o.observacao||"").trim()});}}
+  const total=Array.from(porEmpresa.values()).reduce((a,b)=>a+b.length,0);if(!total){mensagemNaTela("mensagem-resposta","Preencha pelo menos uma oferta antes de enviar.",true);return;}
+  const geral=document.getElementById("resposta-observacao-geral").value.trim();const botao=document.getElementById("enviar-resposta");botao.disabled=true;botao.textContent="ENVIANDO ORÇAMENTO...";
+  try{const batch=writeBatch(db);let ops=0;for(const e of empresas){const itens=porEmpresa.get(e.fornecedorId)||[];const ref=doc(db,"respostas",cotacaoId+"__"+e.fornecedorId);if(itens.length||e.resposta){batch.set(ref,{cotacaoId,fornecedorId:e.fornecedorId,responsavelUid:auth.currentUser?.uid||"",itens,observacaoGeral,enviadoEm:serverTimestamp()});ops++;}if(itens.length){batch.update(doc(db,"cotacao_fornecedores",e.vinculoId),{status:"respondido"});ops++;}}if(!ops)throw new Error("Nenhuma oferta para enviar.");await batch.commit();mensagemNaTela("mensagem-resposta","Orçamento enviado! As duas ofertas foram separadas por empresa para comparação.");area.style.display="none";area.innerHTML="";await carregarCotacoesFornecedor(auth.currentUser.uid);}catch(e){console.error(e);mensagemNaTela("mensagem-resposta",`Não foi possível enviar. ${e.code||e.message||"Verifique as regras do Firebase."}`,true);botao.disabled=false;botao.textContent="ENVIAR ORÇAMENTO";}
 }
+
 
 // MENSAGEM DOS PRODUTOS
 
