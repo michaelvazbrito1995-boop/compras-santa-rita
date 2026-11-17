@@ -1141,3 +1141,23 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
 .comparacao-cotacao .comparacao-tabela thead th{background:#1d5a8e!important;color:#fff!important}
 .comparacao-cotacao .comparacao-tabela tbody th{background:#fff3bd!important;color:#273747!important}
 .comparacao-cotacao .comparacao-tabela tbody td{background:#fffdf4}
+
+/* Organização das cotações: abas de abertas e finalizadas */
+.abas-cotacoes{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 12px;padding:5px;border:1px solid #e8e2cf;border-radius:12px;background:#f8f7f2}
+.aba-cotacoes{flex:1;min-width:130px;padding:11px 14px!important;margin:0!important;border:1px solid transparent!important;border-radius:9px!important;background:transparent!important;color:#655b36!important;font-size:12px!important;font-weight:850!important;letter-spacing:.04em}
+.aba-cotacoes.ativa{background:#fff!important;border-color:#e4d28b!important;color:#493c0a!important;box-shadow:0 2px 7px rgba(80,65,0,.08)}
+.abas-cotacoes-vendedor{margin:4px 0 14px}
+.cotacao-alerta-vendedor{margin:14px 0!important;background:#fff4d0!important;border-color:#e8c94f!important;color:#493d12!important}
+.cotacao-alerta-vendedor p{font-weight:700}
+.resposta-status-enviada{display:inline-flex;align-items:center;justify-content:center;padding:9px 12px;border-radius:9px;background:#e8f5ec;color:#23653a;font-size:11px;font-weight:900;letter-spacing:.04em;white-space:nowrap}
+.resposta-consulta-conteudo{padding:16px}
+.resposta-consulta-conteudo h4{margin:4px 0 14px;font-size:18px;color:#292929}
+.resposta-oferta-consulta{display:grid;gap:3px;padding:7px 0;border-bottom:1px solid #eee}
+.resposta-oferta-consulta:last-child{border-bottom:0}
+.resposta-oferta-consulta b{font-size:12px;color:#454545}
+.resposta-oferta-consulta span{font-weight:800;color:#2e5b3c}
+.resposta-oferta-consulta small{color:#737373;font-size:11px;overflow-wrap:anywhere}
+.resposta-consulta-gerais{margin-top:16px;padding:12px;border-radius:10px;background:#f7f7f3;color:#555;font-size:13px}
+.resposta-consulta-gerais p{margin:8px 0 0}
+.resposta-consulta-bloqueio{margin:16px 0 0;padding:12px;border-radius:9px;background:#f1f5f2;color:#365b42;font-size:12px;font-weight:700;line-height:1.5}
+@media(max-width:600px){.resposta-status-enviada{white-space:normal;text-align:center;font-size:9px;padding:8px}.aba-cotacoes{min-width:0;font-size:11px!important;padding:10px 8px!important}.resposta-consulta-conteudo{padding:11px}}
