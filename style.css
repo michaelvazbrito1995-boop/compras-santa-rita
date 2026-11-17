@@ -512,3 +512,143 @@ footer span {
     font-size: 13px;
   }
 }
+
+/* SELEÇÃO RÁPIDA DE PRODUTOS NA COTAÇÃO */
+.ajuda-cotacao {
+  color: #666;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 6px 0 10px;
+}
+
+#resultados-produtos-cotacao,
+#cotacao-produtos,
+#cotacao-fornecedores {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #e5e5e5;
+  border-radius: 9px;
+  margin-top: 8px;
+  background: #fff;
+}
+
+.resultado-produto-cotacao,
+.produto-selecionado-cotacao {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.resultado-produto-cotacao:last-child,
+.produto-selecionado-cotacao:last-child {
+  border-bottom: 0;
+}
+
+.resultado-produto-info,
+.produto-selecionado-cotacao > span,
+.fornecedor-convite-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resultado-produto-info strong,
+.produto-selecionado-cotacao strong,
+.fornecedor-convite-texto strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.resultado-produto-info small,
+.produto-selecionado-cotacao small,
+.fornecedor-convite-texto small {
+  color: #777;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+.resultado-produto-cotacao button,
+.produto-selecionado-cotacao button {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 7px;
+  padding: 9px 10px;
+  background: #f5c928;
+  color: #292929;
+  font-size: 11px;
+}
+
+.resultado-produto-cotacao button:disabled {
+  background: #e8e8e8;
+  color: #777;
+  cursor: default;
+}
+
+.produto-selecionado-cotacao button {
+  background: #333;
+  color: #fff;
+}
+
+.selecionados-cotacao-wrap {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #eee2a7;
+  border-radius: 10px;
+  background: #fffdf3;
+}
+
+.selecionados-cotacao-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.selecionados-cotacao-titulo span {
+  color: #666;
+  font-size: 12px;
+}
+
+.cotacao-sem-resultado,
+.cotacao-sem-selecao {
+  padding: 12px;
+  color: #777;
+  font-size: 13px;
+}
+
+.fornecedor-convite-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  margin: 6px 0;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #fffdf3;
+  font-weight: normal;
+}
+
+.fornecedor-convite-item input {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+  accent-color: #d6a900;
+}
+
+@media (max-width: 480px) {
+  .resultado-produto-cotacao,
+  .produto-selecionado-cotacao {
+    align-items: flex-start;
+  }
+  .resultado-produto-cotacao button,
+  .produto-selecionado-cotacao button {
+    padding: 9px 7px;
+    font-size: 10px;
+  }
+}

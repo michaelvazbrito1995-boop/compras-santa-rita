@@ -58,6 +58,10 @@ let cadastroEmAndamento = false;
 // Foto opcional do produto (armazenada comprimida no próprio documento).
 let fotoProdutoAtual = "";
 
+// Estado da seleção de produtos na criação de cotações.
+let produtosDisponiveisCotacao = [];
+let produtosSelecionadosCotacao = new Map();
+
 // FUNÇÕES GERAIS
 
 function escaparHTML(texto) {
@@ -1171,7 +1175,9 @@ async function abrirModuloCotacoes(conteudo) {
     <div class="modulo-aberto">
       <h2>📝 Cotações</h2>
       <p>Crie cotações, selecione os produtos e convide os fornecedores ativos.</p>
-      <button type="button" id="nova-cotacao">+ NOVA COTAÇÃO</button>
+      <button type="button" id="nova-cotacao">+ COTAÇÃO ONLINE</button>
+      <button type="button" id="nova-cotacao-presencial">+ COTAÇÃO PRESENCIAL</button>
+      <div id="form-presencial-area" style="display:none"></div>
       <div id="form-cotacao-area" style="display:none">
         <form id="form-cotacao">
           <label for="cotacao-titulo">Título da cotação</label>
@@ -1180,9 +1186,17 @@ async function abrirModuloCotacoes(conteudo) {
           <textarea id="cotacao-descricao" rows="3" placeholder="Informações para os fornecedores"></textarea>
           <label for="cotacao-prazo">Prazo para resposta</label>
           <input id="cotacao-prazo" type="datetime-local" required>
-          <h3 style="margin-top:18px">Produtos</h3>
-          <div id="cotacao-produtos">Carregando produtos...</div>
-          <h3 style="margin-top:18px">Fornecedores convidados</h3>
+          <h3 style="margin-top:18px">Produtos da cotação</h3>
+          <p class="ajuda-cotacao">Pesquise pelo nome ou código de barras e adicione somente o que precisa.</p>
+          <label for="buscar-produto-cotacao">Buscar produto</label>
+          <input id="buscar-produto-cotacao" type="search" autocomplete="off" placeholder="Digite o nome ou código de barras...">
+          <div id="resultados-produtos-cotacao" class="resultados-cotacao">Carregando produtos...</div>
+          <div class="selecionados-cotacao-wrap">
+            <div class="selecionados-cotacao-titulo"><strong>Produtos selecionados</strong><span id="contador-produtos-cotacao">0 itens</span></div>
+            <div id="cotacao-produtos">Nenhum produto selecionado.</div>
+          </div>
+          <h3 style="margin-top:22px">Fornecedores convidados</h3>
+          <p class="ajuda-cotacao">O nome do titular aparece junto da empresa que ele representa.</p>
           <div id="cotacao-fornecedores">Carregando fornecedores...</div>
           <button type="submit" id="salvar-cotacao">CRIAR COTAÇÃO</button>
           <button type="button" id="cancelar-cotacao">CANCELAR</button>
@@ -1196,49 +1210,193 @@ async function abrirModuloCotacoes(conteudo) {
     </div>`;
 
   document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
+  document.getElementById("nova-cotacao-presencial").addEventListener("click", abrirFormularioPresencial);
   document.getElementById("nova-cotacao").addEventListener("click", async () => {
     document.getElementById("form-cotacao-area").style.display = "block";
     await carregarOpcoesCotacao();
   });
   document.getElementById("cancelar-cotacao").addEventListener("click", () => {
     document.getElementById("form-cotacao").reset();
+    produtosSelecionadosCotacao = new Map();
     document.getElementById("form-cotacao-area").style.display = "none";
   });
   document.getElementById("form-cotacao").addEventListener("submit", salvarCotacao);
   await carregarListaCotacoesAdmin();
 }
 
+async function abrirFormularioPresencial() {
+  const area = document.getElementById("form-presencial-area");
+  area.style.display = "block";
+  area.innerHTML = '<p>Carregando produtos e fornecedores...</p>';
+  try {
+    const [ps, fs] = await Promise.all([getDocs(collection(db,"produtos")), getDocs(collection(db,"fornecedores"))]);
+    const produtos = ps.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.ativo===true).sort((a,b)=>String(a.nome).localeCompare(String(b.nome),"pt-BR"));
+    const fornecedoresBase = fs.docs.map(d=>({id:d.id,...d.data()})).filter(f=>f.ativo===true);
+    const uids=[...new Set(fornecedoresBase.map(f=>f.responsavelUid).filter(Boolean))];
+    const titulares=new Map();
+    await Promise.all(uids.map(async uid=>{try{const u=await getDoc(doc(db,"usuarios",uid));if(u.exists())titulares.set(uid,u.data().nome||"Titular não identificado");}catch(e){console.warn(e);}}));
+    const fornecedores=fornecedoresBase.map(f=>({...f,titular:titulares.get(f.responsavelUid)||"Titular não identificado"})).sort((a,b)=>a.titular.localeCompare(b.titular,"pt-BR"));
+    area.innerHTML=`<form id="form-presencial"><h3>Nova cotação presencial</h3>
+      <label>Título da reunião</label><input id="pres-titulo" required placeholder="Ex.: Cotação semanal - bebidas">
+      <label>Data da reunião</label><input id="pres-data" type="date" required value="${new Date().toLocaleDateString('en-CA')}">
+      <label>Adicionar produto</label><input id="pres-busca" type="search" placeholder="Digite nome ou código de barras" autocomplete="off">
+      <div id="pres-resultados" class="resultados-cotacao"></div>
+      <div id="pres-selecionados"></div>
+      <div id="pres-mensagem" role="status"></div>
+      <button type="submit" id="pres-salvar">FINALIZAR E SALVAR NO HISTÓRICO</button>
+      <button type="button" id="pres-cancelar">CANCELAR</button></form>`;
+    const selecionados=new Map();
+    const renderBusca=()=>{const q=normalizarTexto(document.getElementById("pres-busca").value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";document.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
+    const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.titular)}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
+    document.getElementById("pres-busca").addEventListener("input",renderBusca);
+    document.getElementById("pres-cancelar").onclick=()=>{area.style.display="none";area.innerHTML="";};
+    renderBusca();renderTabela();
+    document.getElementById("form-presencial").addEventListener("submit",async ev=>{ev.preventDefault();const btn=document.getElementById("pres-salvar");const msg=document.getElementById("pres-mensagem");const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;
+      if(!titulo||!data||!selecionados.size){msg.textContent="Informe título, data e pelo menos um produto.";return;}
+      const itens=[];let erro="";
+      for(const p of selecionados.values()){const row=document.querySelector(`[data-pres-row="${CSS.escape(p.id)}"]`);const quantidade=Number(row.querySelector(".pres-qtd").value);const vencedorId=row.querySelector(".pres-vencedor").value;const precos=fornecedores.map(f=>{const campo=row.querySelector(`[data-forn="${CSS.escape(f.id)}"]`);return {fornecedorId:f.id,preco:campo.value===""?null:Number(campo.value)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0)){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}itens.push({produtoId:p.id,nome:p.nome,unidade:p.unidade||"UN",quantidade,precos,vencedorId,precoVencedor:vencedor.preco,total:quantidade*vencedor.preco});}
+      if(erro){msg.textContent=erro;return;}const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?i.total:0),0);const valorTotal=itens.reduce((s,i)=>s+i.total,0);
+      btn.disabled=true;btn.textContent="SALVANDO...";try{await addDoc(collection(db,"cotacoes_presenciais"),{titulo,data,reuniaoTipo:"presencial",status:"finalizada",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",criadoEm:serverTimestamp()});msg.textContent="Cotação presencial salva no histórico!";await carregarListaCotacoesAdmin();area.style.display="none";area.innerHTML="";}catch(e){console.error(e);msg.textContent="Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent="FINALIZAR E SALVAR NO HISTÓRICO";}
+    });
+  }catch(e){console.error(e);area.innerHTML='<p>Não foi possível carregar os dados. Verifique o Firebase.</p><button type="button" id="pres-fechar">Fechar</button>';document.getElementById("pres-fechar").onclick=()=>area.style.display="none";}
+}
+
+async function abrirDetalhesPresencial(id) {
+  try { const snap=await getDoc(doc(db,"cotacoes_presenciais",id));if(!snap.exists())return;const c=snap.data();const linhas=(c.itens||[]).map(i=>`<tr><td>${escaparHTML(i.nome)}</td><td>${i.quantidade}</td>${(c.fornecedores||[]).map(f=>{const p=(i.precos||[]).find(x=>x.fornecedorId===f.fornecedorId);return `<td>${p?.preco==null?"—":Number(p.preco).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>`;}).join("")}<td>${escaparHTML((c.fornecedores||[]).find(f=>f.fornecedorId===i.vencedorId)?.titular||"—")}</td></tr>`).join("");const resumo=(c.fornecedores||[]).map(f=>`<p><b>${escaparHTML(f.titular)} (${escaparHTML(f.empresa)})</b>: ${Number(c.totais?.[f.fornecedorId]||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</p>`).join("");alert(`${c.titulo}\nData: ${c.data}\n\n${(c.itens||[]).map(i=>`${i.nome} — ${i.quantidade} x R$ ${Number(i.precoVencedor).toFixed(2)} = R$ ${Number(i.total).toFixed(2)}`).join("\n")}\n\nTotais por vencedor:\n${(c.fornecedores||[]).map(f=>`${f.titular}: R$ ${Number(c.totais?.[f.fornecedorId]||0).toFixed(2)}`).join("\n")}\n\nTOTAL GERAL: R$ ${Number(c.valorTotal||0).toFixed(2)}`);
+  } catch(e){console.error(e);alert("Não foi possível abrir os detalhes.");}
+}
+
 async function carregarOpcoesCotacao() {
   const areaProdutos = document.getElementById("cotacao-produtos");
+  const areaResultados = document.getElementById("resultados-produtos-cotacao");
   const areaFornecedores = document.getElementById("cotacao-fornecedores");
+  const campoBusca = document.getElementById("buscar-produto-cotacao");
+  produtosSelecionadosCotacao = new Map();
+
   try {
     const [prodSnap, fornSnap] = await Promise.all([
       getDocs(collection(db, "produtos")),
       getDocs(collection(db, "fornecedores"))
     ]);
-    const produtos = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(p => p.ativo === true)
-      .sort((a,b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
-    const fornecedores = fornSnap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(f => f.ativo === true)
-      .sort((a,b) => String(a.empresa || "").localeCompare(String(b.empresa || ""), "pt-BR"));
 
-    areaProdutos.innerHTML = produtos.length ? produtos.map(p => `
-      <label class="selecao-item">
-        <input type="checkbox" name="cotacao-produto" value="${escaparHTML(p.id)}">
-        ${escaparHTML(p.nome)} (${escaparHTML(p.unidade || "UN")})
-      </label>`).join("") : "<p>Nenhum produto ativo cadastrado.</p>";
+    produtosDisponiveisCotacao = prodSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(p => p.ativo === true)
+      .sort((a, b) => String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR"));
+
+    const fornecedoresBase = fornSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(f => f.ativo === true);
+
+    // Busca os titulares das contas para exibir Nome (Empresa).
+    const uids = [...new Set(fornecedoresBase.map(f => f.responsavelUid).filter(Boolean))];
+    const usuariosPorUid = new Map();
+    await Promise.all(uids.map(async uid => {
+      try {
+        const usuarioSnap = await getDoc(doc(db, "usuarios", uid));
+        if (usuarioSnap.exists()) usuariosPorUid.set(uid, usuarioSnap.data());
+      } catch (erro) {
+        console.warn("Não foi possível consultar o titular", uid, erro);
+      }
+    }));
+
+    const fornecedores = fornecedoresBase.map(f => ({
+      ...f,
+      titular: usuariosPorUid.get(f.responsavelUid)?.nome || "Titular não identificado"
+    })).sort((a, b) => String(a.titular).localeCompare(String(b.titular), "pt-BR"));
+
+    renderizarResultadosProdutosCotacao("");
+    renderizarProdutosSelecionadosCotacao();
+
+    campoBusca.addEventListener("input", () => {
+      renderizarResultadosProdutosCotacao(campoBusca.value);
+    });
 
     areaFornecedores.innerHTML = fornecedores.length ? fornecedores.map(f => `
-      <label class="selecao-item">
+      <label class="fornecedor-convite-item">
         <input type="checkbox" name="cotacao-fornecedor" value="${escaparHTML(f.id)}">
-        ${escaparHTML(f.empresa || f.nome || "Empresa")}
+        <span class="fornecedor-convite-texto">
+          <strong>${escaparHTML(f.titular)}</strong>
+          <small>(${escaparHTML(f.empresa || f.nome || "Empresa não informada")})</small>
+        </span>
       </label>`).join("") : "<p>Nenhum fornecedor ativo cadastrado.</p>";
   } catch (erro) {
     console.error(erro);
-    areaProdutos.textContent = "Erro ao carregar produtos.";
+    areaProdutos.textContent = "Não foi possível carregar os produtos.";
+    areaResultados.textContent = "Erro ao carregar produtos.";
     areaFornecedores.textContent = "Erro ao carregar fornecedores.";
   }
+}
+
+function renderizarResultadosProdutosCotacao(termo = "") {
+  const area = document.getElementById("resultados-produtos-cotacao");
+  if (!area) return;
+
+  const busca = normalizarTexto(termo);
+  const encontrados = produtosDisponiveisCotacao.filter(p => {
+    const nome = normalizarTexto(p.nome);
+    const codigo = normalizarTexto(p.codigoBarras);
+    return !busca || nome.includes(busca) || codigo.includes(busca);
+  }).slice(0, 30);
+
+  if (!encontrados.length) {
+    area.innerHTML = '<p class="cotacao-sem-resultado">Nenhum produto encontrado. Confira o nome ou código digitado.</p>';
+    return;
+  }
+
+  area.innerHTML = encontrados.map(p => {
+    const jaAdicionado = produtosSelecionadosCotacao.has(p.id);
+    return `
+      <div class="resultado-produto-cotacao">
+        <div class="resultado-produto-info">
+          <strong>${escaparHTML(p.nome || "Produto sem nome")}</strong>
+          <small>${escaparHTML(p.codigoBarras || "Sem código")} · ${escaparHTML(p.unidade || "UN")}</small>
+        </div>
+        <button type="button" data-adicionar-produto-cotacao="${escaparHTML(p.id)}" ${jaAdicionado ? "disabled" : ""}>
+          ${jaAdicionado ? "ADICIONADO" : "+ ADICIONAR"}
+        </button>
+      </div>`;
+  }).join("");
+
+  area.querySelectorAll("[data-adicionar-produto-cotacao]").forEach(botao => {
+    botao.addEventListener("click", () => {
+      const id = botao.dataset.adicionarProdutoCotacao;
+      const produto = produtosDisponiveisCotacao.find(p => p.id === id);
+      if (!produto || produtosSelecionadosCotacao.has(id)) return;
+      produtosSelecionadosCotacao.set(id, produto);
+      renderizarProdutosSelecionadosCotacao();
+      renderizarResultadosProdutosCotacao(document.getElementById("buscar-produto-cotacao")?.value || "");
+    });
+  });
+}
+
+function renderizarProdutosSelecionadosCotacao() {
+  const area = document.getElementById("cotacao-produtos");
+  const contador = document.getElementById("contador-produtos-cotacao");
+  if (!area) return;
+
+  const selecionados = [...produtosSelecionadosCotacao.values()];
+  if (contador) contador.textContent = `${selecionados.length} ${selecionados.length === 1 ? "item" : "itens"}`;
+
+  if (!selecionados.length) {
+    area.innerHTML = '<p class="cotacao-sem-selecao">Nenhum produto adicionado ainda.</p>';
+    return;
+  }
+
+  area.innerHTML = selecionados.map(p => `
+    <div class="produto-selecionado-cotacao">
+      <input type="checkbox" name="cotacao-produto" value="${escaparHTML(p.id)}" checked hidden>
+      <span><strong>${escaparHTML(p.nome)}</strong><small>${escaparHTML(p.unidade || "UN")}</small></span>
+      <button type="button" data-remover-produto-cotacao="${escaparHTML(p.id)}" aria-label="Remover ${escaparHTML(p.nome)}">REMOVER</button>
+    </div>`).join("");
+
+  area.querySelectorAll("[data-remover-produto-cotacao]").forEach(botao => {
+    botao.addEventListener("click", () => {
+      produtosSelecionadosCotacao.delete(botao.dataset.removerProdutoCotacao);
+      renderizarProdutosSelecionadosCotacao();
+      renderizarResultadosProdutosCotacao(document.getElementById("buscar-produto-cotacao")?.value || "");
+    });
+  });
 }
 
 async function salvarCotacao(evento) {
@@ -1291,6 +1449,7 @@ async function salvarCotacao(evento) {
     });
     await lote.commit();
     document.getElementById("form-cotacao").reset();
+    produtosSelecionadosCotacao = new Map();
     document.getElementById("form-cotacao-area").style.display = "none";
     mensagemNaTela("mensagem-cotacao", "Cotação criada e enviada aos fornecedores!");
     await carregarListaCotacoesAdmin();
@@ -1308,10 +1467,12 @@ async function carregarListaCotacoesAdmin() {
   const area = document.getElementById("lista-cotacoes-admin");
   if (!area) return;
   try {
-    const snap = await getDocs(collection(db, "cotacoes"));
-    const cotacoes = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a,b) => (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0));
-    area.innerHTML = cotacoes.length ? cotacoes.map(c => `
+    const [snap, presencialSnap] = await Promise.all([getDocs(collection(db, "cotacoes")), getDocs(collection(db, "cotacoes_presenciais"))]);
+    const cotacoes = snap.docs.map(d => ({ id: d.id, ...d.data(), tipoLista: "online" }));
+    const presenciais = presencialSnap.docs.map(d => ({ id: d.id, ...d.data(), tipoLista: "presencial" }));
+    const todas = [...cotacoes, ...presenciais].sort((a,b) => (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0));
+    area.innerHTML = todas.length ? todas.map(c => c.tipoLista === "presencial" ? `
+      <div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo || "Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data || "—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button></div>` : `
       <div class="aviso-modulo" style="margin:12px 0">
         <strong>${escaparHTML(c.titulo || "Cotação")}</strong>
         <p>Status: <strong>${c.status === "aberta" ? "Aberta" : "Encerrada"}</strong></p>
@@ -1320,6 +1481,7 @@ async function carregarListaCotacoesAdmin() {
         ${c.descricao ? `<p>${escaparHTML(c.descricao)}</p>` : ""}
         ${c.status === "aberta" ? `<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR COTAÇÃO</button>` : ""}
       </div>`).join("") : '<div class="aviso-modulo">Nenhuma cotação cadastrada.</div>';
+    area.querySelectorAll("[data-detalhes-presencial]").forEach(b => b.addEventListener("click", () => abrirDetalhesPresencial(b.dataset.detalhesPresencial)));
     area.querySelectorAll("[data-encerrar-cotacao]").forEach(b => b.addEventListener("click", async () => {
       if (!confirm("Deseja encerrar esta cotação?")) return;
       try {
@@ -1980,7 +2142,7 @@ async function salvarProduto(evento) {
   const dados = {
     nome: document.getElementById("produto-nome").value.trim(),
 
-    codigoBarras: document.getElementById("produto-codigo").value.trim(),
+    codigoBarras: document.getElementById("produto-codigo").value.replace(/\s+/g, "").trim(),
 
     departamento: document.getElementById("produto-departamento").value.trim(),
 
@@ -2010,6 +2172,29 @@ async function salvarProduto(evento) {
   botao.textContent = "SALVANDO...";
 
   try {
+    // Impede cadastrar o mesmo código de barras em produtos diferentes.
+    // Na edição, permite manter o código do próprio produto.
+    if (dados.codigoBarras) {
+      const consultaCodigo = query(
+        collection(db, "produtos"),
+        where("codigoBarras", "==", dados.codigoBarras)
+      );
+
+      const resultadoCodigo = await getDocs(consultaCodigo);
+      const duplicado = resultadoCodigo.docs.find(
+        documento => documento.id !== idEmEdicao
+      );
+
+      if (duplicado) {
+        mostrarMensagemProduto(
+          `Este código de barras já está cadastrado no produto "${duplicado.data().nome || "Produto sem nome"}". Confira o código antes de continuar.`,
+          true
+        );
+        document.getElementById("produto-codigo").focus();
+        return;
+      }
+    }
+
     if (idEmEdicao) {
       await updateDoc(doc(db, "produtos", idEmEdicao), dados);
 
