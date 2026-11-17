@@ -998,3 +998,9 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{scroll-behavior:auto!important;transition:none!important}
 }
+
+/* Cotação presencial: vencedor identificado pelo nome da empresa */
+.pres-matriz{border:1px solid #e7e9ed;border-radius:12px;overflow:hidden;background:#fff}
+.pres-matriz th{white-space:normal;line-height:1.35;background:#fff7d8;color:#5d501b}
+.pres-matriz td{vertical-align:middle}
+.pres-matriz .pres-vencedor{min-width:145px;padding:10px;border:1px solid #d9dce1;border-radius:9px;background:#fff}

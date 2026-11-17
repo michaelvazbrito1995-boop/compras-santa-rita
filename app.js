@@ -1263,7 +1263,7 @@ async function abrirFormularioPresencial() {
       finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
     };
     const renderBusca=()=>{const q=normalizarTexto(document.getElementById("pres-busca").value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";document.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
-    const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.titular)}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
+    const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.empresa||f.nome||f.titular||"Empresa")}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
     document.getElementById("pres-busca").addEventListener("input",renderBusca);
     document.getElementById("pres-cancelar").onclick=()=>{area.style.display="none";area.innerHTML="";};
     renderBusca();renderTabela();
@@ -1278,7 +1278,7 @@ async function abrirFormularioPresencial() {
 }
 
 async function abrirDetalhesPresencial(id) {
-  try { const snap=await getDoc(doc(db,"cotacoes_presenciais",id));if(!snap.exists())return;const c=snap.data();const linhas=(c.itens||[]).map(i=>`<tr><td>${escaparHTML(i.nome)}</td><td>${i.quantidade}</td>${(c.fornecedores||[]).map(f=>{const p=(i.precos||[]).find(x=>x.fornecedorId===f.fornecedorId);return `<td>${p?.preco==null?"—":Number(p.preco).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>`;}).join("")}<td>${escaparHTML((c.fornecedores||[]).find(f=>f.fornecedorId===i.vencedorId)?.titular||"—")}</td></tr>`).join("");const resumo=(c.fornecedores||[]).map(f=>`<p><b>${escaparHTML(f.titular)} (${escaparHTML(f.empresa)})</b>: ${Number(c.totais?.[f.fornecedorId]||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</p>`).join("");alert(`${c.titulo}\nData: ${c.data}\n\n${(c.itens||[]).map(i=>`${i.nome} — ${i.quantidade} x R$ ${Number(i.precoVencedor).toFixed(2)} = R$ ${Number(i.total).toFixed(2)}`).join("\n")}\n\nTotais por vencedor:\n${(c.fornecedores||[]).map(f=>`${f.titular}: R$ ${Number(c.totais?.[f.fornecedorId]||0).toFixed(2)}`).join("\n")}\n\nTOTAL GERAL: R$ ${Number(c.valorTotal||0).toFixed(2)}`);
+  try { const snap=await getDoc(doc(db,"cotacoes_presenciais",id));if(!snap.exists())return;const c=snap.data();const linhas=(c.itens||[]).map(i=>`<tr><td>${escaparHTML(i.nome)}</td><td>${i.quantidade}</td>${(c.fornecedores||[]).map(f=>{const p=(i.precos||[]).find(x=>x.fornecedorId===f.fornecedorId);return `<td>${p?.preco==null?"—":Number(p.preco).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td>`;}).join("")}<td>${escaparHTML((c.fornecedores||[]).find(f=>f.fornecedorId===i.vencedorId)?.empresa || (c.fornecedores||[]).find(f=>f.fornecedorId===i.vencedorId)?.nome || "—")}</td></tr>`).join("");const resumo=(c.fornecedores||[]).map(f=>`<p><b>${escaparHTML(f.titular)} (${escaparHTML(f.empresa)})</b>: ${Number(c.totais?.[f.fornecedorId]||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</p>`).join("");alert(`${c.titulo}\nData: ${c.data}\n\n${(c.itens||[]).map(i=>`${i.nome} — ${i.quantidade} x R$ ${Number(i.precoVencedor).toFixed(2)} = R$ ${Number(i.total).toFixed(2)}`).join("\n")}\n\nTotais por vencedor:\n${(c.fornecedores||[]).map(f=>`${f.titular}: R$ ${Number(c.totais?.[f.fornecedorId]||0).toFixed(2)}`).join("\n")}\n\nTOTAL GERAL: R$ ${Number(c.valorTotal||0).toFixed(2)}`);
   } catch(e){console.error(e);alert("Não foi possível abrir os detalhes.");}
 }
 
@@ -1518,9 +1518,80 @@ async function migrarAcessosCotacoes(){
 async function excluirCotacaoOnline(id){if(!confirm("Excluir esta cotação e todas as respostas/vínculos relacionados? Esta ação não pode ser desfeita."))return;try{const [vs,rs]=await Promise.all([getDocs(query(collection(db,"cotacao_fornecedores"),where("cotacaoId","==",id))),getDocs(query(collection(db,"respostas"),where("cotacaoId","==",id)))]);const docs=[...vs.docs,...rs.docs];for(let i=0;i<docs.length;i+=450){const batch=writeBatch(db);docs.slice(i,i+450).forEach(d=>batch.delete(d.ref));await batch.commit();}await deleteDoc(doc(db,"cotacoes",id));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir a cotação. Confira as regras do Firestore.");}}
 
 
-async function baixarImagemCotacao(tipo,id){try{const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));if(!snap.exists())throw new Error("Cotação não encontrada");const c=snap.data(), itens=tipo==="online"?(c.produtos||[]):(c.itens||[]);const linhaH=48,altura=Math.min(12000,210+itens.length*linhaH);const canvas=document.createElement("canvas");canvas.width=1400;canvas.height=altura;const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="#222";ctx.font="bold 34px Arial";ctx.fillText("COMPRAS SANTA RITA",55,60);ctx.font="bold 27px Arial";ctx.fillText(String(c.titulo||"Cotação").slice(0,65),55,108);ctx.font="18px Arial";ctx.fillText(`Tipo: ${tipo==="online"?"Online":"Presencial"}   Data: ${c.data||"—"}   Gerado: ${new Date().toLocaleString("pt-BR")}`,55,145);ctx.fillStyle="#f2c928";ctx.fillRect(50,175,1300,42);ctx.fillStyle="#222";ctx.font="bold 17px Arial";const cols=tipo==="online"?[55,570,930,1110]:[55,620,790,970,1150];const heads=tipo==="online"?["Produto","Código de barras","Unidade","Quantidade"]:["Produto","Unidade","Qtd.","Preço","Total"];heads.forEach((h,i)=>ctx.fillText(h,cols[i],203));ctx.font="16px Arial";itens.forEach((it,i)=>{const y=245+i*linhaH;if(y>altura-15)return;ctx.strokeStyle="#ddd";ctx.beginPath();ctx.moveTo(50,y-23);ctx.lineTo(1350,y-23);ctx.stroke();const vals=tipo==="online"?[it.nome,it.codigoBarras||"—",it.unidade||"UN",String(it.quantidade||1)]:[it.nome,it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})];vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,42),cols[j],y));});const a=document.createElement("a");a.download=`cotacao-${tipo}-${id}.png`;a.href=canvas.toDataURL("image/png");a.click();}catch(e){console.error(e);alert(e.message||"Não foi possível gerar a imagem.");}}
+async function baixarImagemCotacao(tipo,id){
+  try {
+    const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));
+    if(!snap.exists()) throw new Error("Cotação não encontrada");
+    const c=snap.data(), itens=tipo==="online"?(c.produtos||[]):(c.itens||[]);
+    const presencial=tipo==="presencial";
+    const linhaH=52, altura=Math.min(14000,230+itens.length*linhaH);
+    const canvas=document.createElement("canvas");
+    canvas.width=presencial?1600:1400; canvas.height=altura;
+    const ctx=canvas.getContext("2d");
+    ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle="#222";ctx.font="bold 34px Arial";ctx.fillText("COMPRAS SANTA RITA",55,60);
+    ctx.font="bold 27px Arial";ctx.fillText(String(c.titulo||"Cotação").slice(0,65),55,108);
+    ctx.font="18px Arial";ctx.fillText(`Tipo: ${presencial?"Presencial":"Online"}   Data: ${c.data||"—"}   Gerado: ${new Date().toLocaleString("pt-BR")}`,55,145);
+    ctx.fillStyle="#f2c928";ctx.fillRect(50,175,canvas.width-100,42);
+    ctx.fillStyle="#222";ctx.font="bold 17px Arial";
+    const cols=presencial?[55,470,850,970,1100,1280]:[55,570,930,1110];
+    const heads=presencial?["Produto","Empresa vencedora","Unidade","Qtd.","Preço vencedor","Total"]:["Produto","Código de barras","Unidade","Quantidade"];
+    heads.forEach((h,i)=>ctx.fillText(h,cols[i],203));
+    ctx.font="16px Arial";
+    itens.forEach((it,i)=>{
+      const y=245+i*linhaH;if(y>altura-15)return;
+      ctx.strokeStyle="#ddd";ctx.beginPath();ctx.moveTo(50,y-23);ctx.lineTo(canvas.width-50,y-23);ctx.stroke();
+      const empresaVencedora=presencial?(c.fornecedores||[]).find(f=>f.fornecedorId===it.vencedorId):null;
+      const vals=presencial
+        ?[it.nome,empresaVencedora?.empresa||empresaVencedora?.nome||"—",it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})]
+        :[it.nome,it.codigoBarras||"—",it.unidade||"UN",String(it.quantidade||1)];
+      vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===1?28:42),cols[j],y));
+    });
+    if(presencial){
+      const y=altura-35;ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,y);
+    }
+    const a=document.createElement("a");a.download=`cotacao-${tipo}-${id}.png`;a.href=canvas.toDataURL("image/png");a.click();
+  } catch(e){console.error(e);alert(e.message||"Não foi possível gerar a imagem.");}
+}
 
-async function exportarCotacao(tipo,id){try{const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));if(!snap.exists())throw new Error("Cotação não encontrada");const c=snap.data();const dataHora=c.criadoEm?.toDate?c.criadoEm.toDate().toLocaleString("pt-BR"):new Date().toLocaleString("pt-BR");let linhas="";if(tipo==="online"){linhas=(c.produtos||[]).map(p=>`<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${Number(p.quantidade||1).toLocaleString("pt-BR")}</td></tr>`).join("");}else{linhas=(c.itens||[]).map(p=>`<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`).join("");}const headers=tipo==="online"?"<th>Produto</th><th>Código de barras</th><th>Un.</th><th>Quantidade</th>":"<th>Produto</th><th>Un.</th><th>Qtd.</th><th>Preço</th><th>Total</th>";const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(c.titulo||"Cotação")}</title><style>body{font:14px Arial;padding:28px;color:#222}h1{color:#333}small{color:#555}.meta{margin:16px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #bbb;padding:9px;text-align:left}th{background:#f2c928} @media print{button{display:none}body{padding:0}}</style><h1>Compras Santa Rita</h1><h2>${escaparHTML(c.titulo||"Cotação")}</h2><div class="meta">Tipo: ${tipo==="online"?"Online":"Presencial"}<br>Data: ${escaparHTML(c.data||dataHora)}<br>Gerado em: ${dataHora}<br>Status: ${escaparHTML(c.status||"Finalizada")}</div>${c.descricao?`<p><b>Observações:</b> ${escaparHTML(c.descricao)}</p>`:""}<table><thead><tr>${headers}</tr></thead><tbody>${linhas}</tbody></table>${tipo==="presencial"?`<h3>Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</h3>`:""}<p style="margin-top:30px;font-size:11px">Documento gerado pelo sistema Compras Santa Rita.</p><button onclick="window.print()">Salvar como PDF / Imprimir</button></html>`;const w=window.open("","_blank");if(!w)throw new Error("Permita pop-ups para exportar a cotação.");w.document.write(html);w.document.close();}catch(e){console.error(e);alert(e.message||"Não foi possível exportar.");}}
+async function exportarCotacao(tipo,id){
+  try {
+    const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));
+    if(!snap.exists()) throw new Error("Cotação não encontrada");
+    const c=snap.data();
+    const dataHora=c.criadoEm?.toDate?c.criadoEm.toDate().toLocaleString("pt-BR"):new Date().toLocaleString("pt-BR");
+    const presencial=tipo==="presencial";
+    let linhas="";
+    if(!presencial){
+      linhas=(c.produtos||[]).map(p=>`<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${Number(p.quantidade||1).toLocaleString("pt-BR")}</td></tr>`).join("");
+    } else {
+      linhas=(c.itens||[]).map(p=>{
+        const vencedora=(c.fornecedores||[]).find(f=>f.fornecedorId===p.vencedorId);
+        return `<tr><td>${escaparHTML(p.nome)}</td><td><strong>${escaparHTML(vencedora?.empresa||vencedora?.nome||"—")}</strong></td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;
+      }).join("");
+    }
+    const headers=presencial
+      ?"<th>Produto</th><th>Empresa vencedora</th><th>Un.</th><th>Qtd.</th><th>Preço vencedor</th><th>Total</th>"
+      :"<th>Produto</th><th>Código de barras</th><th>Un.</th><th>Quantidade</th>";
+    const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(c.titulo||"Cotação")}</title><style>
+      body{font:14px Arial;padding:28px;color:#222}h1{color:#333}small{color:#555}
+      .meta{margin:16px 0;line-height:1.7}table{width:100%;border-collapse:collapse;margin-top:20px}
+      th,td{border:1px solid #bbb;padding:9px;text-align:left;vertical-align:top}
+      th{background:#f2c928}tbody tr:nth-child(even){background:#fafafa}
+      .total{margin-top:20px;font-size:18px;font-weight:bold}
+      @media print{button{display:none}body{padding:0}}
+    </style><h1>Compras Santa Rita</h1><h2>${escaparHTML(c.titulo||"Cotação")}</h2>
+      <div class="meta">Tipo: ${presencial?"Presencial":"Online"}<br>Data: ${escaparHTML(c.data||dataHora)}<br>Gerado em: ${dataHora}<br>Status: ${escaparHTML(c.status||"Finalizada")}</div>
+      ${c.descricao?`<p><b>Observações:</b> ${escaparHTML(c.descricao)}</p>`:""}
+      <table><thead><tr>${headers}</tr></thead><tbody>${linhas}</tbody></table>
+      ${presencial?`<div class="total">Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</div>`:""}
+      <p style="margin-top:30px;font-size:11px">Documento gerado pelo sistema Compras Santa Rita.</p>
+      <button onclick="window.print()">Salvar como PDF / Imprimir</button></html>`;
+    const w=window.open("","_blank");
+    if(!w) throw new Error("Permita pop-ups para exportar a cotação.");
+    w.document.write(html);w.document.close();
+  } catch(e){console.error(e);alert(e.message||"Não foi possível exportar.");}
+}
 
 // MÓDULO DE RESPOSTAS — COMPARAÇÃO DE PREÇOS
 
