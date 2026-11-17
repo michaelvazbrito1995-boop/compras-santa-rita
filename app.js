@@ -1156,8 +1156,12 @@ async function abrirModuloCotacoes(conteudo) {
         <form id="form-cotacao">
           <label for="cotacao-titulo">Título da cotação</label>
           <input id="cotacao-titulo" required placeholder="Ex.: Cotação semanal de mercearia">
-          <label for="cotacao-descricao">Observações</label>
-          <textarea id="cotacao-descricao" rows="3" placeholder="Informações para os fornecedores"></textarea>
+          <div class="cotacao-alerta-fixo" role="note" aria-label="Atenção aos fornecedores">
+            <strong>ATENÇÃO!</strong>
+            <p>A quantidade e os valores dos produtos devem estar de acordo com a cotação. Caso haja divergências, a mercadoria será devolvida.</p>
+          </div>
+          <label for="cotacao-descricao">Informações adicionais (opcional)</label>
+          <textarea id="cotacao-descricao" rows="3" placeholder="Outras informações para os fornecedores"></textarea>
           <label for="cotacao-prazo">Prazo para resposta</label>
           <input id="cotacao-prazo" type="datetime-local" required>
           <h3 style="margin-top:18px">Produtos da cotação</h3>
@@ -1533,7 +1537,7 @@ async function baixarImagemCotacao(tipo,id){
     if(!snap.exists()) throw new Error("Cotação não encontrada");
     const c=snap.data(), itens=tipo==="online"?(c.produtos||[]):(c.itens||[]);
     const presencial=tipo==="presencial";
-    const linhaH=52, altura=Math.min(14000,230+itens.length*linhaH);
+    const linhaH=52, altura=Math.min(14000,300+itens.length*linhaH);
     const canvas=document.createElement("canvas");
     canvas.width=presencial?1600:1400; canvas.height=altura;
     const ctx=canvas.getContext("2d");
@@ -1557,7 +1561,7 @@ async function baixarImagemCotacao(tipo,id){
       vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===2?28:presencial&&j===1?20:42),cols[j],y));
     });
     if(presencial){
-      const y=altura-35;ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,y);
+      const y=altura-55;ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,y);
     }
     const a=document.createElement("a");a.download=`cotacao-${tipo}-${id}.png`;a.href=canvas.toDataURL("image/png");a.click();
   } catch(e){console.error(e);alert(e.message||"Não foi possível gerar a imagem.");}
@@ -1815,7 +1819,7 @@ async function enviarRespostaFornecedor(evento){
   for(let i=0;i<(cot.produtos||[]).length;i++){const p=cot.produtos[i],o=area._rascunho.get(i)||{};if(!o.fornecedorId){if(o.preco||o.indisponivel||String(o.observacao||"").trim()){mensagemNaTela("mensagem-resposta","Selecione a empresa para o produto preenchido.",true);return;}continue;}if(!ids.has(o.fornecedorId)){mensagemNaTela("mensagem-resposta","Selecione uma das suas empresas cadastradas.",true);return;}const preco=o.preco===""?null:Number(o.preco);if(!o.indisponivel&&(!Number.isFinite(preco)||preco<=0)){mensagemNaTela("mensagem-resposta","Informe o preço ou marque que a empresa não tem o produto.",true);return;}porEmpresa.get(o.fornecedorId).push({indiceProduto:i,produtoId:p.produtoId,nome:p.nome,descricao:p.descricao||"",codigoBarras:p.codigoBarras||"",unidade:p.unidade||"UN",quantidade:Number(p.quantidade||1),indisponivel:!!o.indisponivel,preco:o.indisponivel?null:preco,observacao:String(o.observacao||"").trim()});}
   const total=Array.from(porEmpresa.values()).reduce((a,b)=>a+b.length,0);if(!total){mensagemNaTela("mensagem-resposta","Preencha pelo menos uma oferta antes de enviar.",true);return;}
   const geral=document.getElementById("resposta-observacao-geral").value.trim();const botao=document.getElementById("enviar-resposta");botao.disabled=true;botao.textContent="ENVIANDO ORÇAMENTO...";
-  try{const batch=writeBatch(db);let ops=0;for(const e of empresas){const itens=porEmpresa.get(e.fornecedorId)||[];const ref=doc(db,"respostas",cotacaoId+"__"+e.fornecedorId);if(itens.length||e.resposta){batch.set(ref,{cotacaoId,fornecedorId:e.fornecedorId,responsavelUid:auth.currentUser?.uid||"",itens,observacaoGeral,enviadoEm:serverTimestamp()});ops++;}if(itens.length){batch.update(doc(db,"cotacao_fornecedores",e.vinculoId),{status:"respondido"});ops++;}}if(!ops)throw new Error("Nenhuma oferta para enviar.");await batch.commit();mensagemNaTela("mensagem-resposta","Orçamento enviado! Cada produto foi associado à empresa escolhida.");area.style.display="none";area.innerHTML="";await carregarCotacoesFornecedor(auth.currentUser.uid);}catch(e){console.error(e);mensagemNaTela("mensagem-resposta",`Não foi possível enviar. ${e.code||e.message||"Verifique as regras do Firebase."}`,true);botao.disabled=false;botao.textContent="ENVIAR ORÇAMENTO";}
+  try{const batch=writeBatch(db);let ops=0;for(const e of empresas){const itens=porEmpresa.get(e.fornecedorId)||[];const ref=doc(db,"respostas",cotacaoId+"__"+e.fornecedorId);if(itens.length||e.resposta){batch.set(ref,{cotacaoId,fornecedorId:e.fornecedorId,responsavelUid:auth.currentUser?.uid||"",itens,observacaoGeral:geral,enviadoEm:serverTimestamp()});ops++;}if(itens.length){batch.update(doc(db,"cotacao_fornecedores",e.vinculoId),{status:"respondido"});ops++;}}if(!ops)throw new Error("Nenhuma oferta para enviar.");await batch.commit();mensagemNaTela("mensagem-resposta","Orçamento enviado! Cada produto foi associado à empresa escolhida.");area.style.display="none";area.innerHTML="";await carregarCotacoesFornecedor(auth.currentUser.uid);}catch(e){console.error(e);mensagemNaTela("mensagem-resposta",`Não foi possível enviar. ${e.code||e.message||"Verifique as regras do Firebase."}`,true);botao.disabled=false;botao.textContent="ENVIAR ORÇAMENTO";}
 }
 
 // MENSAGEM DOS PRODUTOS

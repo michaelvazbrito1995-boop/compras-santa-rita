@@ -1031,3 +1031,9 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
 .oferta-vendedor-bloco .resposta-indisponivel input{width:18px;height:18px;flex:0 0 auto}
 .resposta-produto-card>p{color:#69717c;font-size:13px}
 @media(max-width:600px){.cotacao-acoes-editor{grid-template-columns:1fr}.cotacao-acoes-editor button{width:100%}.comparacao-cotacao{padding:12px}.oferta-vendedor-bloco{padding:11px}}
+
+
+/* Aviso fixo de atenção na criação da cotação online */
+.cotacao-alerta-fixo{margin:14px 0 18px;padding:15px 16px;border:1px solid #e6c229;border-left:5px solid #d5aa00;border-radius:12px;background:#fff7d6;color:#493d12;box-shadow:0 2px 8px rgba(110,85,0,.08)}
+.cotacao-alerta-fixo strong{display:block;margin-bottom:5px;font-size:15px;letter-spacing:.3px;color:#745d00}
+.cotacao-alerta-fixo p{margin:0;line-height:1.5;font-weight:600}
