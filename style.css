@@ -806,3 +806,16 @@ footer span {
  .resposta-produto-detalhes{grid-template-columns:1fr 1fr}
  .resposta-lista-cabecalho h4{font-size:17px}
 }
+
+
+/* Cotação online: escolha de empresa por produto */
+.cotacao-selecao-ajuda{font-size:12px;color:#777;margin:5px 0 10px}
+.cotacao-proposta-mista-btn{width:100%;margin-top:14px!important}
+.resposta-multiplas-empresas{align-items:flex-start}
+.resposta-escolha-explicacao{display:flex;flex-direction:column;gap:4px;margin:14px 14px 0;padding:12px 13px;border:1px solid #eee4bd;border-left:4px solid #e5bf24;border-radius:10px;background:#fffdf4}
+.resposta-escolha-explicacao strong{font-size:13px;color:#665400}
+.resposta-escolha-explicacao span{font-size:12px;line-height:1.45;color:#666}
+.resposta-empresa-produto-label{display:block;margin:13px 0 6px;font-size:11px;font-weight:800;letter-spacing:.45px;color:#75631a}
+.resposta-empresa-produto{display:block;width:100%;min-width:0;padding:12px 11px!important;border:1.5px solid #d8c77f!important;border-radius:9px!important;background:#fff!important;color:#333;font-size:14px!important;font-weight:700}
+.resposta-empresa-produto:focus{outline:0;border-color:#b58d00!important;box-shadow:0 0 0 3px rgba(219,180,0,.12)}
+.cotacao-empresas-vendedor .cotacao-empresa-vendedor{grid-template-columns:minmax(0,1fr) auto}

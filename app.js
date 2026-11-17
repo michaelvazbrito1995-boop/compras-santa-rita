@@ -1551,7 +1551,7 @@ async function carregarRespostasAdmin() {
   try {
     const filtro = document.getElementById("filtro-cotacao-respostas")?.value || "";
     const snap = await getDocs(collection(db, "respostas"));
-    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => !filtro || r.cotacaoId === filtro);
+    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => (!filtro || r.cotacaoId === filtro) && Array.isArray(r.itens) && r.itens.length > 0);
     if (!respostas.length) { area.innerHTML = '<div class="aviso-modulo">Ainda não há respostas para esta seleção.</div>'; return; }
     const enriquecidas = await Promise.all(respostas.map(async r => {
       const [cot, forn, usuario] = await Promise.all([
@@ -1626,169 +1626,405 @@ async function carregarCotacoesFornecedor(uid) {
   const area = document.getElementById("lista-cotacoes-fornecedor");
   if (!area) return;
   try {
-    const vinculosSnap = await getDocs(query(collection(db,"cotacao_fornecedores"),where("responsavelUid","==",uid)));
-    const vinculos = vinculosSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const vinculosSnap = await getDocs(query(
+      collection(db, "cotacao_fornecedores"),
+      where("responsavelUid", "==", uid)
+    ));
+    const vinculos = vinculosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (!vinculos.length) {
-      area.innerHTML='<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação por enquanto</strong><span>Quando uma cotação for enviada às suas empresas, ela aparecerá aqui.</span></div>';
+      area.innerHTML = '<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação por enquanto</strong><span>Quando uma cotação for enviada às suas empresas, ela aparecerá aqui.</span></div>';
       return;
     }
-    const registros=await Promise.all(vinculos.map(async v=>{
-      const [cotSnap,fornSnap]=await Promise.all([
-        getDoc(doc(db,"cotacoes",v.cotacaoId)),
-        getDoc(doc(db,"fornecedores",v.fornecedorId))
+
+    const registros = await Promise.all(vinculos.map(async v => {
+      const [cotSnap, fornSnap] = await Promise.all([
+        getDoc(doc(db, "cotacoes", v.cotacaoId)),
+        getDoc(doc(db, "fornecedores", v.fornecedorId))
       ]);
-      return {...v,cotacao:cotSnap.exists()?{id:cotSnap.id,...cotSnap.data()}:null,fornecedor:fornSnap.exists()?fornSnap.data():null};
+      return {
+        ...v,
+        cotacao: cotSnap.exists() ? { id: cotSnap.id, ...cotSnap.data() } : null,
+        fornecedor: fornSnap.exists() ? fornSnap.data() : null
+      };
     }));
-    const agrupados=new Map();
-    registros.filter(r=>r.cotacao&&r.fornecedor?.ativo===true).forEach(r=>{
-      if(!agrupados.has(r.cotacaoId)) agrupados.set(r.cotacaoId,{cotacao:r.cotacao,empresas:[]});
+
+    const agrupados = new Map();
+    registros.filter(r => r.cotacao && r.fornecedor?.ativo === true).forEach(r => {
+      if (!agrupados.has(r.cotacaoId)) agrupados.set(r.cotacaoId, { cotacao: r.cotacao, empresas: [] });
       agrupados.get(r.cotacaoId).empresas.push(r);
     });
-    const lista=[...agrupados.values()].sort((a,b)=>new Date(a.cotacao.prazo||0)-new Date(b.cotacao.prazo||0));
-    area.innerHTML=lista.length?lista.map(g=>{
-      const c=g.cotacao, aberta=c.status==="aberta"&&(!c.prazo||new Date(c.prazo)>new Date());
-      const prazo=c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Sem prazo definido";
+
+    const lista = [...agrupados.values()].sort((a, b) =>
+      new Date(a.cotacao.prazo || 0) - new Date(b.cotacao.prazo || 0)
+    );
+
+    area.innerHTML = lista.length ? lista.map(g => {
+      const c = g.cotacao;
+      const aberta = c.status === "aberta" && (!c.prazo || new Date(c.prazo) > new Date());
+      const prazo = c.prazo ? new Date(c.prazo).toLocaleString("pt-BR") : "Sem prazo definido";
       return `<article class="cotacao-vendedor-card">
-        <div class="cotacao-vendedor-topo"><span class="cotacao-vendedor-kicker">SOLICITAÇÃO DE PREÇOS</span><span class="cotacao-status ${aberta?'aberta':'encerrada'}">${aberta?'Recebendo propostas':'Encerrada'}</span></div>
-        <h3>${escaparHTML(c.titulo||'Cotação sem título')}</h3>
-        <div class="cotacao-resumo-vendedor"><span><b>${(c.produtos||[]).length}</b> produtos</span><span>Prazo: ${escaparHTML(prazo)}</span></div>
-        ${c.descricao?`<div class="cotacao-descricao-vendedor"><b>Orientações da compra</b><p>${escaparHTML(c.descricao)}</p></div>`:''}
-        <div class="cotacao-empresas-titulo">Escolha a empresa que fará esta proposta</div>
-        <div class="cotacao-empresas-vendedor">${g.empresas.map(r=>{
-          const empresa=r.fornecedor.empresa||'Empresa sem nome';
-          const respondida=r.status==='respondido';
+        <div class="cotacao-vendedor-topo">
+          <span class="cotacao-vendedor-kicker">SOLICITAÇÃO DE PREÇOS</span>
+          <span class="cotacao-status ${aberta ? 'aberta' : 'encerrada'}">${aberta ? 'Recebendo propostas' : 'Encerrada'}</span>
+        </div>
+        <h3>${escaparHTML(c.titulo || 'Cotação sem título')}</h3>
+        <div class="cotacao-resumo-vendedor">
+          <span><b>${(c.produtos || []).length}</b> produtos</span>
+          <span>Prazo: ${escaparHTML(prazo)}</span>
+        </div>
+        ${c.descricao ? `<div class="cotacao-descricao-vendedor"><b>Orientações da compra</b><p>${escaparHTML(c.descricao)}</p></div>` : ''}
+        <div class="cotacao-empresas-titulo">Suas empresas disponíveis</div>
+        <p class="cotacao-selecao-ajuda">Você poderá escolher uma empresa diferente em cada produto.</p>
+        <div class="cotacao-empresas-vendedor">${g.empresas.map(r => {
+          const empresa = r.fornecedor.empresa || 'Empresa sem nome';
+          const respondida = r.status === 'respondido';
           return `<div class="cotacao-empresa-vendedor">
-            <div class="cotacao-empresa-identidade"><span class="cotacao-empresa-icone">▦</span><div><strong>${escaparHTML(empresa)}</strong><small>${respondida?'Proposta já enviada':'Aguardando seus preços'}</small></div></div>
-            <span class="cotacao-empresa-status ${respondida?'respondida':'pendente'}">${respondida?'Enviada':'Pendente'}</span>
-            ${aberta?`<button type="button" class="botao-cotacao-empresa" data-responder-cotacao="${escaparHTML(c.id)}" data-fornecedor-id="${escaparHTML(r.fornecedorId)}">${respondida?'REVISAR PROPOSTA':'PREENCHER PREÇOS'} <span>›</span></button>`:''}
+            <div class="cotacao-empresa-identidade">
+              <span class="cotacao-empresa-icone">▦</span>
+              <div><strong>${escaparHTML(empresa)}</strong><small>${respondida ? 'Já participou desta proposta' : 'Disponível para cotar'}</small></div>
+            </div>
+            <span class="cotacao-empresa-status ${respondida ? 'respondida' : 'pendente'}">${respondida ? 'Vinculada' : 'Disponível'}</span>
           </div>`;
         }).join('')}</div>
-        ${!aberta?'<p class="cotacao-aviso-encerrada">Esta cotação não está mais recebendo propostas.</p>':''}
+        ${aberta ? `<button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-responder-cotacao="${escaparHTML(c.id)}">MONTAR PROPOSTA POR PRODUTO <span>›</span></button>` : '<p class="cotacao-aviso-encerrada">Esta cotação não está mais recebendo propostas.</p>'}
       </article>`;
-    }).join(''):'<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação disponível</strong><span>Não há solicitações vinculadas às suas empresas neste momento.</span></div>';
-    area.querySelectorAll('[data-responder-cotacao]').forEach(b=>b.addEventListener('click',()=>abrirFormularioResposta(b.dataset.responderCotacao,b.dataset.fornecedorId)));
-  } catch(erro) {
-    console.error('Erro ao carregar cotações do fornecedor:',erro);
-    area.textContent='Não foi possível carregar as cotações.';
+    }).join('') : '<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação disponível</strong><span>Não há solicitações vinculadas às suas empresas neste momento.</span></div>';
+
+    area.querySelectorAll('[data-responder-cotacao]').forEach(b =>
+      b.addEventListener('click', () => abrirFormularioResposta(b.dataset.responderCotacao))
+    );
+  } catch (erro) {
+    console.error("Erro ao carregar cotações do fornecedor:", erro);
+    area.textContent = "Não foi possível carregar as cotações.";
   }
 }
 
-async function abrirFormularioResposta(cotacaoId, fornecedorId) {
+async function abrirFormularioResposta(cotacaoId) {
   const area = document.getElementById("form-resposta-fornecedor");
   if (!area) return;
   try {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error("Faça login novamente para responder.");
+
     const snap = await getDoc(doc(db, "cotacoes", cotacaoId));
     if (!snap.exists()) throw new Error("Cotação não encontrada.");
     const cot = snap.data();
-    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) { alert("O prazo desta cotação terminou."); return; }
-    const [vinculoSnap, fornecedorSnap, respostaAnteriorSnap] = await Promise.all([
-      getDoc(doc(db,"cotacao_fornecedores",cotacaoId+"__"+fornecedorId)),
-      getDoc(doc(db,"fornecedores",fornecedorId)),
-      getDoc(doc(db,"respostas",cotacaoId+"__"+fornecedorId))
-    ]);
-    if(!vinculoSnap.exists()||vinculoSnap.data().responsavelUid!==auth.currentUser?.uid) throw new Error("Acesso não autorizado a esta empresa.");
-    const empresa=fornecedorSnap.exists()?(fornecedorSnap.data().empresa||"Empresa") : "Empresa";
-    const respostaAnterior = respostaAnteriorSnap.exists() ? respostaAnteriorSnap.data() : null;
-    const produtos=cot.produtos||[];
+    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) {
+      alert("O prazo desta cotação terminou.");
+      return;
+    }
+
+    // Recupera todas as empresas vinculadas a este vendedor para esta cotação.
+    const vinculosSnap = await getDocs(query(
+      collection(db, "cotacao_fornecedores"),
+      where("responsavelUid", "==", uid)
+    ));
+    const vinculos = vinculosSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(v => v.cotacaoId === cotacaoId);
+
+    if (!vinculos.length) throw new Error("Nenhuma empresa sua está vinculada a esta cotação.");
+
+    const empresas = (await Promise.all(vinculos.map(async v => {
+      const [fornSnap, respostaSnap] = await Promise.all([
+        getDoc(doc(db, "fornecedores", v.fornecedorId)),
+        getDoc(doc(db, "respostas", cotacaoId + "__" + v.fornecedorId))
+      ]);
+      if (!fornSnap.exists() || fornSnap.data().ativo !== true) return null;
+      return {
+        fornecedorId: v.fornecedorId,
+        vinculoId: v.id,
+        empresa: fornSnap.data().empresa || "Empresa sem nome",
+        resposta: respostaSnap.exists() ? respostaSnap.data() : null
+      };
+    }))).filter(Boolean);
+
+    if (!empresas.length) throw new Error("Não encontramos empresas ativas para esta cotação.");
+
+    const produtos = cot.produtos || [];
     area.style.display = "block";
     area.dataset.cotacaoId = cotacaoId;
-    area.dataset.fornecedorId = fornecedorId;
     area.innerHTML = `
       <section class="resposta-online-shell">
         <div class="resposta-online-header">
           <button type="button" class="resposta-fechar" id="cancelar-resposta" aria-label="Fechar">×</button>
           <span class="resposta-online-eyebrow">PROPOSTA COMERCIAL</span>
-          <h3>${escaparHTML(cot.titulo||'Cotação')}</h3>
-          <div class="resposta-empresa-destaque"><span class="resposta-empresa-icone">▦</span><div><small>VOCÊ ESTÁ RESPONDENDO COMO</small><strong>${escaparHTML(empresa)}</strong></div></div>
-          <div class="resposta-online-metricas"><span><b>${produtos.length}</b> produtos</span><span><b>${cot.prazo?new Date(cot.prazo).toLocaleDateString('pt-BR'):'—'}</b> prazo final</span></div>
+          <h3>${escaparHTML(cot.titulo || 'Cotação')}</h3>
+          <div class="resposta-empresa-destaque resposta-multiplas-empresas">
+            <span class="resposta-empresa-icone">▦</span>
+            <div><small>EMPRESAS QUE VOCÊ PODE UTILIZAR</small><strong>${empresas.map(e => escaparHTML(e.empresa)).join(' · ')}</strong></div>
+          </div>
+          <div class="resposta-online-metricas">
+            <span><b>${produtos.length}</b> produtos</span>
+            <span><b>${cot.prazo ? new Date(cot.prazo).toLocaleDateString('pt-BR') : '—'}</b> prazo final</span>
+          </div>
         </div>
-        ${cot.descricao?`<div class="resposta-orientacoes"><strong>Orientações do comprador</strong><p>${escaparHTML(cot.descricao)}</p></div>`:''}
+        ${cot.descricao ? `<div class="resposta-orientacoes"><strong>Orientações do comprador</strong><p>${escaparHTML(cot.descricao)}</p></div>` : ''}
+        <div class="resposta-escolha-explicacao">
+          <strong>Escolha por produto</strong>
+          <span>Em cada item, selecione qual das suas empresas fará a oferta. Você pode alternar entre elas na mesma cotação.</span>
+        </div>
         <form id="form-resposta" class="resposta-online-form">
-          <div class="resposta-lista-cabecalho"><div><span class="resposta-online-eyebrow">ITENS DA COTAÇÃO</span><h4>Informe seus preços</h4></div><span id="resposta-progresso-texto" class="resposta-progresso-texto"></span></div>
+          <div class="resposta-lista-cabecalho">
+            <div><span class="resposta-online-eyebrow">ITENS DA COTAÇÃO</span><h4>Informe seus preços</h4></div>
+            <span id="resposta-progresso-texto" class="resposta-progresso-texto"></span>
+          </div>
           <div class="resposta-progresso-trilho"><span id="resposta-progresso-barra"></span></div>
           <div id="resposta-itens-pagina"></div>
-          <div class="paginacao-resposta resposta-paginacao-nova"><button type="button" id="resposta-anterior">← Anterior</button><span id="resposta-pagina-info"></span><button type="button" id="resposta-proxima">Próxima →</button></div>
-          <section class="resposta-observacao-geral"><label for="resposta-observacao-geral">Condições comerciais gerais <small>(opcional)</small></label><textarea id="resposta-observacao-geral" rows="3" placeholder="Ex.: prazo de entrega, forma de pagamento, validade da proposta...">${escaparHTML(respostaAnterior?.observacaoGeral||'')}</textarea></section>
-          <div class="resposta-acoes-finais"><button type="submit" id="enviar-resposta" class="resposta-enviar-btn">ENVIAR PROPOSTA</button><p id="mensagem-resposta" role="status"></p><small>Confira os preços antes de enviar. Você poderá revisar a proposta enquanto a cotação estiver aberta.</small></div>
+          <div class="paginacao-resposta resposta-paginacao-nova">
+            <button type="button" id="resposta-anterior">← Anterior</button>
+            <span id="resposta-pagina-info"></span>
+            <button type="button" id="resposta-proxima">Próxima →</button>
+          </div>
+          <section class="resposta-observacao-geral">
+            <label for="resposta-observacao-geral">Condições comerciais gerais <small>(opcional)</small></label>
+            <textarea id="resposta-observacao-geral" rows="3" placeholder="Ex.: prazo de entrega, forma de pagamento, validade da proposta..."></textarea>
+          </section>
+          <div class="resposta-acoes-finais">
+            <button type="submit" id="enviar-resposta" class="resposta-enviar-btn">ENVIAR PROPOSTA</button>
+            <p id="mensagem-resposta" role="status"></p>
+            <small>O sistema separará automaticamente os produtos por empresa ao enviar. Você poderá revisar a proposta enquanto a cotação estiver aberta.</small>
+          </div>
         </form>
       </section>`;
 
-    const porPagina=5;
-    let pagina=0;
-    const total=produtos.length;
-    const rascunho=new Map();
-    (respostaAnterior?.itens||[]).forEach((it,i)=>rascunho.set(i,{indisponivel:!!it.indisponivel,preco:it.preco==null?'':String(it.preco),observacao:it.observacao||''}));
-    area._rascunho=rascunho;
-    const guardarPagina=()=>{
-      area.querySelectorAll('[data-resposta-item]').forEach(bloco=>{
-        const n=Number(bloco.dataset.respostaItem);
-        rascunho.set(n,{indisponivel:!!bloco.querySelector('.item-indisponivel')?.checked,preco:bloco.querySelector(`[name="preco-${n}"]`)?.value||'',observacao:bloco.querySelector(`[name="obs-${n}"]`)?.value||''});
+    const porPagina = 5;
+    let pagina = 0;
+    const total = produtos.length;
+    const rascunho = new Map();
+
+    // Aproveita os dados já enviados anteriormente, mantendo a empresa e o preço mais recentes por produto.
+    const respostasOrdenadas = empresas
+      .filter(e => e.resposta)
+      .sort((a, b) => {
+        const ta = a.resposta.enviadoEm?.toMillis ? a.resposta.enviadoEm.toMillis() : 0;
+        const tb = b.resposta.enviadoEm?.toMillis ? b.resposta.enviadoEm.toMillis() : 0;
+        return tb - ta;
+      });
+
+    respostasOrdenadas.forEach(e => {
+      (e.resposta.itens || []).forEach((it, pos) => {
+        const indice = Number.isInteger(it.indiceProduto) ? it.indiceProduto : pos;
+        if (!rascunho.has(indice)) {
+          rascunho.set(indice, {
+            fornecedorId: e.fornecedorId,
+            indisponivel: !!it.indisponivel,
+            preco: it.preco == null ? '' : String(it.preco),
+            observacao: it.observacao || ''
+          });
+        }
+      });
+    });
+
+    area._rascunho = rascunho;
+    area._empresas = empresas;
+
+    const guardarPagina = () => {
+      area.querySelectorAll('[data-resposta-item]').forEach(bloco => {
+        const n = Number(bloco.dataset.respostaItem);
+        rascunho.set(n, {
+          fornecedorId: bloco.querySelector(`[name="empresa-${n}"]`)?.value || '',
+          indisponivel: !!bloco.querySelector('.item-indisponivel')?.checked,
+          preco: bloco.querySelector(`[name="preco-${n}"]`)?.value || '',
+          observacao: bloco.querySelector(`[name="obs-${n}"]`)?.value || ''
+        });
       });
     };
-    const atualizarProgresso=()=>{
-      const preenchidos=produtos.reduce((s,_,i)=>{const d=rascunho.get(i);return s+(d&&(d.indisponivel||(Number(d.preco)>0))?1:0);},0);
-      const texto=document.getElementById('resposta-progresso-texto');
-      const barra=document.getElementById('resposta-progresso-barra');
-      if(texto)texto.textContent=`${preenchidos} de ${total} preenchidos`;
-      if(barra)barra.style.width=`${total?preenchidos/total*100:0}%`;
+
+    const atualizarProgresso = () => {
+      const preenchidos = produtos.reduce((s, _, i) => {
+        const d = rascunho.get(i);
+        return s + (d?.fornecedorId && (d.indisponivel || Number(d.preco) > 0) ? 1 : 0);
+      }, 0);
+      const texto = document.getElementById('resposta-progresso-texto');
+      const barra = document.getElementById('resposta-progresso-barra');
+      if (texto) texto.textContent = `${preenchidos} de ${total} preenchidos`;
+      if (barra) barra.style.width = `${total ? preenchidos / total * 100 : 0}%`;
     };
-    const render=()=>{
-      const inicio=pagina*porPagina;
-      const itens=produtos.slice(inicio,inicio+porPagina);
-      document.getElementById('resposta-itens-pagina').innerHTML=itens.map((p,i)=>{
-        const n=inicio+i,d=rascunho.get(n)||{};
+
+    const render = () => {
+      const inicio = pagina * porPagina;
+      const paginaProdutos = produtos.slice(inicio, inicio + porPagina);
+      document.getElementById('resposta-itens-pagina').innerHTML = paginaProdutos.map((p, i) => {
+        const n = inicio + i;
+        const d = rascunho.get(n) || {};
+        const opcoes = empresas.map(e =>
+          `<option value="${escaparHTML(e.fornecedorId)}" ${d.fornecedorId === e.fornecedorId ? 'selected' : ''}>${escaparHTML(e.empresa)}</option>`
+        ).join('');
         return `<article class="resposta-produto-card" data-resposta-item="${n}">
-          <div class="resposta-produto-topo"><span class="resposta-produto-numero">${String(n+1).padStart(2,'0')}</span><span class="resposta-produto-unidade">${escaparHTML(p.unidade||'UN')}</span></div>
-          <h5>${escaparHTML(p.nome||'Produto sem nome')}</h5>
-          ${p.descricao?`<p class="resposta-produto-descricao">${escaparHTML(p.descricao)}</p>`:''}
-          <div class="resposta-produto-detalhes"><span><small>CÓDIGO DE BARRAS</small><b>${escaparHTML(p.codigoBarras||'Não informado')}</b></span><span><small>QUANTIDADE SOLICITADA</small><b>${Number(p.quantidade||1).toLocaleString('pt-BR')} ${escaparHTML(p.unidade||'UN')}</b></span></div>
+          <div class="resposta-produto-topo">
+            <span class="resposta-produto-numero">${String(n + 1).padStart(2, '0')}</span>
+            <span class="resposta-produto-unidade">${escaparHTML(p.unidade || 'UN')}</span>
+          </div>
+          <h5>${escaparHTML(p.nome || 'Produto sem nome')}</h5>
+          ${p.descricao ? `<p class="resposta-produto-descricao">${escaparHTML(p.descricao)}</p>` : ''}
+          <div class="resposta-produto-detalhes">
+            <span><small>CÓDIGO DE BARRAS</small><b>${escaparHTML(p.codigoBarras || 'Não informado')}</b></span>
+            <span><small>QUANTIDADE SOLICITADA</small><b>${Number(p.quantidade || 1).toLocaleString('pt-BR')} ${escaparHTML(p.unidade || 'UN')}</b></span>
+          </div>
+          <label class="resposta-empresa-produto-label" for="empresa-${n}">EMPRESA QUE FARÁ A OFERTA</label>
+          <select id="empresa-${n}" name="empresa-${n}" class="resposta-empresa-produto" required>
+            <option value="">Selecione a empresa para este produto</option>
+            ${opcoes}
+          </select>
           <label class="resposta-preco-label" for="preco-${n}">Preço unitário <span>R$</span></label>
-          <div class="resposta-preco-wrap"><span>R$</span><input id="preco-${n}" name="preco-${n}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" value="${escaparHTML(d.preco||'')}" ${d.indisponivel?'disabled':''}></div>
-          <label class="resposta-indisponivel"><input type="checkbox" name="indisponivel-${n}" class="item-indisponivel" ${d.indisponivel?'checked':''}><span><b>Não trabalho com este produto</b><small>Marque somente se não puder fornecer este item.</small></span></label>
+          <div class="resposta-preco-wrap"><span>R$</span><input id="preco-${n}" name="preco-${n}" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="0,00" value="${escaparHTML(d.preco || '')}" ${d.indisponivel ? 'disabled' : ''}></div>
+          <label class="resposta-indisponivel">
+            <input type="checkbox" name="indisponivel-${n}" class="item-indisponivel" ${d.indisponivel ? 'checked' : ''}>
+            <span><b>Esta empresa não fornece este produto</b><small>Marque somente se a empresa selecionada não puder fornecer o item.</small></span>
+          </label>
           <label class="resposta-observacao-label" for="obs-${n}">Observação sobre este produto <small>(opcional)</small></label>
-          <input id="obs-${n}" name="obs-${n}" class="resposta-observacao-input" placeholder="Marca, validade, bonificação..." value="${escaparHTML(d.observacao||'')}">
+          <input id="obs-${n}" name="obs-${n}" class="resposta-observacao-input" placeholder="Marca, validade, bonificação..." value="${escaparHTML(d.observacao || '')}">
         </article>`;
       }).join('');
-      document.getElementById('resposta-pagina-info').textContent=`${inicio+1}–${Math.min(inicio+porPagina,total)} de ${total} produtos`;
-      document.getElementById('resposta-anterior').disabled=pagina===0;
-      document.getElementById('resposta-proxima').disabled=(pagina+1)*porPagina>=total;
-      area.querySelectorAll('.item-indisponivel').forEach(chk=>chk.addEventListener('change',()=>{
-        const bloco=chk.closest('[data-resposta-item]');
-        const n=Number(bloco.dataset.respostaItem);
-        const preco=bloco.querySelector(`[name="preco-${n}"]`);
-        preco.disabled=chk.checked;
-        if(chk.checked)preco.value='';
-        rascunho.set(n,{indisponivel:chk.checked,preco:preco.value,observacao:bloco.querySelector(`[name="obs-${n}"]`).value});
+
+      document.getElementById('resposta-pagina-info').textContent =
+        `${inicio + 1}–${Math.min(inicio + porPagina, total)} de ${total} produtos`;
+      document.getElementById('resposta-anterior').disabled = pagina === 0;
+      document.getElementById('resposta-proxima').disabled = (pagina + 1) * porPagina >= total;
+
+      area.querySelectorAll('.item-indisponivel').forEach(chk => chk.addEventListener('change', () => {
+        const bloco = chk.closest('[data-resposta-item]');
+        const n = Number(bloco.dataset.respostaItem);
+        const preco = bloco.querySelector(`[name="preco-${n}"]`);
+        preco.disabled = chk.checked;
+        if (chk.checked) preco.value = '';
+        guardarPagina();
         atualizarProgresso();
       }));
-      area.querySelectorAll('[data-resposta-item] input').forEach(input=>input.addEventListener('input',()=>{guardarPagina();atualizarProgresso();}));
+
+      area.querySelectorAll('[data-resposta-item] input').forEach(input =>
+        input.addEventListener('input', () => { guardarPagina(); atualizarProgresso(); })
+      );
+      area.querySelectorAll('[data-resposta-item] select').forEach(select =>
+        select.addEventListener('change', () => { guardarPagina(); atualizarProgresso(); })
+      );
       atualizarProgresso();
     };
-    document.getElementById('resposta-anterior').onclick=()=>{guardarPagina();pagina--;render();};
-    document.getElementById('resposta-proxima').onclick=()=>{guardarPagina();pagina++;render();};
-    document.getElementById('cancelar-resposta').onclick=()=>{area.style.display='none';area.innerHTML='';};
+
+    document.getElementById('resposta-anterior').onclick = () => { guardarPagina(); pagina--; render(); };
+    document.getElementById('resposta-proxima').onclick = () => { guardarPagina(); pagina++; render(); };
+    document.getElementById('cancelar-resposta').onclick = () => { area.style.display = 'none'; area.innerHTML = ''; };
     render();
-    document.getElementById('form-resposta').addEventListener('submit',enviarRespostaFornecedor);
-    area.scrollIntoView({behavior:'smooth',block:'start'});
-  } catch(erro) {
-    console.error('Falha ao abrir formulário da cotação:',{code:erro?.code,message:erro?.message,cotacaoId,fornecedorId});
-    const detalhe=erro?.code?` (${erro.code})`:'';
-    alert(`Não foi possível abrir esta cotação${detalhe}. ${erro?.message||'Verifique o acesso desta empresa à cotação.'}`);
+    document.getElementById('form-resposta').addEventListener('submit', enviarRespostaFornecedor);
+    area.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (erro) {
+    console.error("Falha ao abrir formulário da cotação:", { code: erro?.code, message: erro?.message, cotacaoId });
+    const detalhe = erro?.code ? ` (${erro.code})` : '';
+    alert(`Não foi possível abrir esta cotação${detalhe}. ${erro?.message || 'Verifique o acesso às empresas desta cotação.'}`);
   }
 }
 
 async function enviarRespostaFornecedor(evento) {
   evento.preventDefault();
-  const area=document.getElementById("form-resposta-fornecedor"), cotacaoId=area.dataset.cotacaoId, fornecedorId=area.dataset.fornecedorId;
-  const cotSnap=await getDoc(doc(db,"cotacoes",cotacaoId));
-  if(!cotSnap.exists()||cotSnap.data().status!=="aberta"){mensagemNaTela("mensagem-resposta","Esta cotação foi encerrada.",true);return;}
-  const cot=cotSnap.data();
-  area.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);area._rascunho=area._rascunho||new Map();area._rascunho.set(n,{indisponivel:!!bloco.querySelector(".item-indisponivel")?.checked,preco:bloco.querySelector(`[name="preco-${n}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}"]`)?.value||""});});
-  const itens=(cot.produtos||[]).map((p,i)=>{const d=area._rascunho?.get(i)||{};const indisponivel=!!d.indisponivel;const preco=d.preco===""?null:Number(d.preco);return {produtoId:p.produtoId,nome:p.nome,descricao:p.descricao||"",codigoBarras:p.codigoBarras||"",unidade:p.unidade||"UN",quantidade:Number(p.quantidade||1),indisponivel,preco,observacao:String(d.observacao||"").trim()};});
-  if(itens.some(i=>!i.indisponivel&&(!Number.isFinite(i.preco)||i.preco<=0))){mensagemNaTela("mensagem-resposta","Informe o preço ou marque o produto como indisponível em todos os itens.",true);return;}
-  const botao=document.getElementById("enviar-resposta");botao.disabled=true;botao.textContent="ENVIANDO...";
-  try{const respostaId=cotacaoId+"__"+fornecedorId;await setDoc(doc(db,"respostas",respostaId),{cotacaoId,fornecedorId,responsavelUid:auth.currentUser?.uid||"",itens,observacaoGeral:document.getElementById("resposta-observacao-geral").value.trim(),enviadoEm:serverTimestamp()});await updateDoc(doc(db,"cotacao_fornecedores",respostaId),{status:"respondido"});mensagemNaTela("mensagem-resposta","Resposta enviada com sucesso!");area.style.display="none";area.innerHTML="";await carregarCotacoesFornecedor(auth.currentUser.uid);}
-  catch(erro){console.error(erro);mensagemNaTela("mensagem-resposta","Não foi possível enviar a resposta. Verifique as regras do Firebase.",true);botao.disabled=false;botao.textContent="ENVIAR RESPOSTA";}
+  const area = document.getElementById("form-resposta-fornecedor");
+  const cotacaoId = area.dataset.cotacaoId;
+  const cotSnap = await getDoc(doc(db, "cotacoes", cotacaoId));
+  if (!cotSnap.exists() || cotSnap.data().status !== "aberta") {
+    mensagemNaTela("mensagem-resposta", "Esta cotação foi encerrada.", true);
+    return;
+  }
+
+  const cot = cotSnap.data();
+  area.querySelectorAll("[data-resposta-item]").forEach(bloco => {
+    const n = Number(bloco.dataset.respostaItem);
+    area._rascunho = area._rascunho || new Map();
+    area._rascunho.set(n, {
+      fornecedorId: bloco.querySelector(`[name="empresa-${n}"]`)?.value || '',
+      indisponivel: !!bloco.querySelector(".item-indisponivel")?.checked,
+      preco: bloco.querySelector(`[name="preco-${n}"]`)?.value || "",
+      observacao: bloco.querySelector(`[name="obs-${n}"]`)?.value || ""
+    });
+  });
+
+  const rascunho = area._rascunho || new Map();
+  const itens = (cot.produtos || []).map((p, i) => {
+    const d = rascunho.get(i) || {};
+    const indisponivel = !!d.indisponivel;
+    const preco = d.preco === "" ? null : Number(d.preco);
+    return {
+      indiceProduto: i,
+      fornecedorId: d.fornecedorId || "",
+      produtoId: p.produtoId,
+      nome: p.nome,
+      descricao: p.descricao || "",
+      codigoBarras: p.codigoBarras || "",
+      unidade: p.unidade || "UN",
+      quantidade: Number(p.quantidade || 1),
+      indisponivel,
+      preco,
+      observacao: String(d.observacao || "").trim()
+    };
+  });
+
+  if (itens.some(i => !i.fornecedorId)) {
+    mensagemNaTela("mensagem-resposta", "Selecione qual empresa fará a oferta de cada produto.", true);
+    return;
+  }
+  if (itens.some(i => !i.indisponivel && (!Number.isFinite(i.preco) || i.preco <= 0))) {
+    mensagemNaTela("mensagem-resposta", "Informe o preço ou marque que a empresa selecionada não fornece o produto.", true);
+    return;
+  }
+
+  const empresas = area._empresas || [];
+  const idsPermitidos = new Set(empresas.map(e => e.fornecedorId));
+  if (itens.some(i => !idsPermitidos.has(i.fornecedorId))) {
+    mensagemNaTela("mensagem-resposta", "Uma das empresas selecionadas não está vinculada a esta cotação. Atualize a página e tente novamente.", true);
+    return;
+  }
+
+  const observacaoGeral = document.getElementById("resposta-observacao-geral").value.trim();
+  const botao = document.getElementById("enviar-resposta");
+  botao.disabled = true;
+  botao.textContent = "ENVIANDO PROPOSTA...";
+
+  try {
+    const grupos = new Map();
+    empresas.forEach(e => grupos.set(e.fornecedorId, []));
+    itens.forEach(item => grupos.get(item.fornecedorId).push(item));
+
+    const batch = writeBatch(db);
+    let operacoes = 0;
+
+    for (const empresa of empresas) {
+      const fornecedorId = empresa.fornecedorId;
+      const itensDaEmpresa = grupos.get(fornecedorId) || [];
+      const respostaAnterior = empresa.resposta;
+      const respostaRef = doc(db, "respostas", cotacaoId + "__" + fornecedorId);
+
+      // Atualiza propostas anteriores mesmo quando o vendedor moveu todos os itens
+      // daquela empresa para outra, evitando preços antigos duplicados no comparativo.
+      if (itensDaEmpresa.length > 0 || respostaAnterior) {
+        batch.set(respostaRef, {
+          cotacaoId,
+          fornecedorId,
+          responsavelUid: auth.currentUser?.uid || "",
+          itens: itensDaEmpresa,
+          observacaoGeral,
+          enviadoEm: serverTimestamp()
+        });
+        operacoes++;
+      }
+
+      if (itensDaEmpresa.length > 0) {
+        batch.update(doc(db, "cotacao_fornecedores", empresa.vinculoId), { status: "respondido" });
+        operacoes++;
+      }
+    }
+
+    if (!operacoes) throw new Error("Nenhum produto foi atribuído às empresas.");
+    await batch.commit();
+
+    mensagemNaTela("mensagem-resposta", "Proposta enviada! Os produtos foram separados por empresa.");
+    area.style.display = "none";
+    area.innerHTML = "";
+    await carregarCotacoesFornecedor(auth.currentUser.uid);
+  } catch (erro) {
+    console.error("Erro ao enviar proposta dividida por empresa:", erro);
+    mensagemNaTela("mensagem-resposta", `Não foi possível enviar a proposta. ${erro?.code || erro?.message || "Verifique as regras do Firebase."}`, true);
+    botao.disabled = false;
+    botao.textContent = "ENVIAR PROPOSTA";
+  }
 }
 
 // MENSAGEM DOS PRODUTOS
