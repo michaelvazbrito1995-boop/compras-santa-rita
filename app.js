@@ -20,7 +20,9 @@ import {
   query,
   where,
   serverTimestamp,
-  writeBatch
+  writeBatch,
+  arrayUnion,
+  runTransaction
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 // FIREBASE
@@ -597,74 +599,29 @@ async function cadastrarEmpresa(evento, uid) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // Buscar primeiro todas as cotações que ainda estão abertas.
-    const consultaCotacoes = query(
-      collection(db, "cotacoes"),
-      where("status", "==", "aberta")
-    );
-
-    const resultadoCotacoes = await getDocs(consultaCotacoes);
-    const cotacoesAbertas = resultadoCotacoes.docs;
-      // Uma gravação da empresa + uma para cada vínculo. Limite do lote: 500.
-    if (cotacoesAbertas.length > 499) {
-      throw new Error("LIMITE_COTACOES");
-    }
-
-    // Criar ID da empresa e preparar todas as gravações em um único lote.
-    const empresaRef = doc(collection(db, "fornecedores"));
-    const lote = writeBatch(db);
-
-    lote.set(empresaRef, {
+    // O fornecedor cadastra a empresa. O administrador escolhe os
+    // fornecedores ao criar cada nova cotação online.
+    await addDoc(collection(db, "fornecedores"), {
       empresa: nome,
       responsavelUid: uid,
       ativo: true,
       criadoEm: serverTimestamp()
     });
 
-    cotacoesAbertas.forEach(cotacao => {
-      const vinculoId = cotacao.id + "__" + empresaRef.id;
-      const vinculoRef = doc(db, "cotacao_fornecedores", vinculoId);
-
-      lote.set(vinculoRef, {
-        cotacaoId: cotacao.id,
-        fornecedorId: empresaRef.id,
-        responsavelUid: uid,
-        status: "convidado",
-        criadoEm: serverTimestamp()
-      });
-    });
-
-    // Empresa e vínculos são confirmados juntos ou não são gravados.
-    await lote.commit();
-
     document.getElementById("form-empresa").reset();
     document.getElementById("area-cadastro-empresa").style.display = "none";
-
-    mensagemNaTela(
-      "mensagem-empresa",
-      "Empresa cadastrada com sucesso!"
-    );
-
+    mensagemNaTela("mensagem-empresa", "Empresa cadastrada com sucesso!");
     await carregarEmpresas(uid);
 
   } catch (erro) {
     console.error("Erro ao cadastrar empresa:", erro);
-
-    let mensagem = "Não foi possível cadastrar a empresa. Verifique as regras do Firebase.";
-
-    if (erro.message === "LIMITE_COTACOES") {
-      mensagem = "Há muitas cotações abertas para cadastrar a empresa de uma só vez.";
-    } else if (erro.code === "permission-denied") {
-      mensagem = "O Firebase não autorizou a operação. As regras precisam permitir o cadastro em lote.";
-    }
-
+    const mensagem = erro.code === "permission-denied"
+      ? "O Firebase não autorizou o cadastro. Verifique as regras de segurança."
+      : "Não foi possível cadastrar a empresa. Tente novamente.";
     mensagemNaTela("mensagem-empresa", mensagem, true);
-
   } finally {
-    if (botao) {
-      botao.disabled = false;
-      botao.textContent = "SALVAR EMPRESA";
-    }
+    botao.disabled = false;
+    botao.textContent = "SALVAR EMPRESA";
   }
 }
 
@@ -1239,15 +1196,48 @@ async function abrirModuloCotacoes(conteudo) {
 
 async function criarProdutoRapido(nome, unidade, codigoBarras = "") {
   const nomeLimpo = String(nome || "").trim();
-  const codigo = String(codigoBarras || "").replace(/\s+/g, "").trim();
+  const codigo = String(codigoBarras || "").replace(/\D/g, "");
   if (!nomeLimpo) throw new Error("Informe o nome do produto.");
+
   if (codigo) {
-    const existente = await getDocs(query(collection(db, "produtos"), where("codigoBarras", "==", codigo)));
-    if (!existente.empty) throw new Error(`Este código já está cadastrado em ${existente.docs[0].data().nome || "outro produto"}.`);
+    const existente = await getDocs(query(
+      collection(db, "produtos"),
+      where("codigoBarras", "==", codigo)
+    ));
+    if (!existente.empty) {
+      throw new Error(`Este código já está cadastrado em ${existente.docs[0].data().nome || "outro produto"}.`);
+    }
   }
-  const dados = { nome: nomeLimpo, unidade: unidade || "UN", codigoBarras: codigo, departamento: "Não informado", categoria: "Geral", ativo: true, foto: "", criadoEm: serverTimestamp() };
-  const ref = await addDoc(collection(db, "produtos"), dados);
-  return { id: ref.id, ...dados };
+
+  const produtoRef = doc(collection(db, "produtos"));
+  const dados = {
+    nome: nomeLimpo,
+    unidade: unidade || "UN",
+    codigoBarras: codigo,
+    departamento: "Não informado",
+    categoria: "Geral",
+    ativo: true,
+    foto: "",
+    criadoEm: serverTimestamp()
+  };
+
+  await runTransaction(db, async transacao => {
+    const codigoRef = codigo ? doc(db, "codigos_barras", codigo) : null;
+    const codigoSnap = codigoRef ? await transacao.get(codigoRef) : null;
+    if (codigoSnap?.exists()) {
+      throw new Error("CODIGO_BARRAS_DUPLICADO");
+    }
+    transacao.set(produtoRef, dados);
+    if (codigoRef) {
+      transacao.set(codigoRef, {
+        produtoId: produtoRef.id,
+        codigoBarras: codigo,
+        atualizadoEm: serverTimestamp()
+      });
+    }
+  });
+
+  return { id: produtoRef.id, ...dados };
 }
 
 async function abrirFormularioPresencial() {
@@ -1483,8 +1473,13 @@ async function salvarCotacao(evento) {
 
     const cotacaoRef = doc(collection(db, "cotacoes"));
     const lote = writeBatch(db);
+    const responsaveisUids = [...new Set(
+      fornecedores.map(f => f.data().responsavelUid).filter(Boolean)
+    )];
+
     lote.set(cotacaoRef, {
       titulo, descricao, prazo: prazo.toISOString(), produtos,
+      responsaveisUids,
       status: "aberta", criadoEm: serverTimestamp(),
       criadoPor: auth.currentUser?.uid || ""
     });
@@ -2186,35 +2181,27 @@ async function salvarProduto(evento) {
   evento.preventDefault();
 
   const botao = document.getElementById("botao-salvar-produto");
-
   const idEmEdicao = produtoEditandoId;
+  const codigoDigitado = document.getElementById("produto-codigo").value.trim();
+  const codigoBarras = codigoDigitado.replace(/\D/g, "");
 
   const dados = {
     nome: document.getElementById("produto-nome").value.trim(),
-
-    codigoBarras: document.getElementById("produto-codigo").value.replace(/\s+/g, "").trim(),
-
+    codigoBarras,
     departamento: document.getElementById("produto-departamento").value.trim(),
-
     categoria: document.getElementById("produto-categoria").value.trim(),
-
     unidade: document.getElementById("produto-unidade").value,
-
     ativo: document.getElementById("produto-ativo").checked,
-
     foto: fotoProdutoAtual || ""
   };
 
-  if (
-    !dados.nome ||
-    !dados.departamento ||
-    !dados.categoria ||
-    !dados.unidade
-  ) {
-    mostrarMensagemProduto(
-      "Preencha todos os campos obrigatórios.",
-      true
-    );
+  if (!dados.nome || !dados.departamento || !dados.categoria || !dados.unidade) {
+    mostrarMensagemProduto("Preencha todos os campos obrigatórios.", true);
+    return;
+  }
+
+  if (codigoDigitado && !codigoBarras) {
+    mostrarMensagemProduto("Digite um código de barras válido, usando números.", true);
     return;
   }
 
@@ -2222,22 +2209,18 @@ async function salvarProduto(evento) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // Impede cadastrar o mesmo código de barras em produtos diferentes.
-    // Na edição, permite manter o código do próprio produto.
-    if (dados.codigoBarras) {
+    // Verificação complementar dos produtos antigos, antes de ativar o índice único.
+    if (codigoBarras) {
       const consultaCodigo = query(
         collection(db, "produtos"),
-        where("codigoBarras", "==", dados.codigoBarras)
+        where("codigoBarras", "==", codigoBarras)
       );
-
       const resultadoCodigo = await getDocs(consultaCodigo);
-      const duplicado = resultadoCodigo.docs.find(
-        documento => documento.id !== idEmEdicao
-      );
+      const duplicado = resultadoCodigo.docs.find(documento => documento.id !== idEmEdicao);
 
       if (duplicado) {
         mostrarMensagemProduto(
-          `Este código de barras já está cadastrado no produto "${duplicado.data().nome || "Produto sem nome"}". Confira o código antes de continuar.`,
+          `Este código de barras já está cadastrado no produto "${duplicado.data().nome || "Produto sem nome"}".`,
           true
         );
         document.getElementById("produto-codigo").focus();
@@ -2245,48 +2228,74 @@ async function salvarProduto(evento) {
       }
     }
 
-    if (idEmEdicao) {
-      await updateDoc(doc(db, "produtos", idEmEdicao), dados);
+    const produtoRef = idEmEdicao
+      ? doc(db, "produtos", idEmEdicao)
+      : doc(collection(db, "produtos"));
+    const codigoNovoRef = codigoBarras
+      ? doc(db, "codigos_barras", codigoBarras)
+      : null;
 
-    } else {
-      await addDoc(collection(db, "produtos"), {
+    await runTransaction(db, async transacao => {
+      const codigoAnterior = idEmEdicao
+        ? (todosProdutos.find(p => p.id === idEmEdicao)?.codigoBarras || "").replace(/\D/g, "")
+        : "";
+      const codigoAntigoRef = codigoAnterior
+        ? doc(db, "codigos_barras", codigoAnterior)
+        : null;
+
+      // Todas as leituras acontecem antes das gravações da transação.
+      const codigoNovoSnap = codigoNovoRef ? await transacao.get(codigoNovoRef) : null;
+      const codigoAntigoSnap = codigoAntigoRef && codigoAnterior !== codigoBarras
+        ? await transacao.get(codigoAntigoRef)
+        : null;
+
+      if (codigoNovoSnap?.exists() && codigoNovoSnap.data().produtoId !== produtoRef.id) {
+        throw new Error("CODIGO_BARRAS_DUPLICADO");
+      }
+
+      transacao.set(produtoRef, {
         ...dados,
-        criadoEm: serverTimestamp()
-      });
-    }
+        ...(idEmEdicao ? {} : { criadoEm: serverTimestamp() })
+      }, { merge: Boolean(idEmEdicao) });
+
+      if (codigoNovoRef) {
+        transacao.set(codigoNovoRef, {
+          produtoId: produtoRef.id,
+          codigoBarras,
+          atualizadoEm: serverTimestamp()
+        });
+      }
+
+      if (codigoAntigoSnap?.exists() && codigoAntigoSnap.data().produtoId === produtoRef.id) {
+        transacao.delete(codigoAntigoRef);
+      }
+    });
 
     limparFormularioProduto();
-
     paginaAtual = 0;
-
     await carregarProdutos();
 
     const mensagemLista = document.getElementById("mensagem-lista");
-
     if (mensagemLista) {
       mensagemLista.textContent = idEmEdicao
         ? "Produto atualizado com sucesso!"
         : "Produto cadastrado com sucesso!";
-
       mensagemLista.style.color = "#267326";
     }
-
   } catch (erro) {
     console.error("Erro ao salvar produto:", erro);
-
     mostrarMensagemProduto(
-      "Não foi possível salvar o produto. Tente novamente.",
+      erro.message === "CODIGO_BARRAS_DUPLICADO"
+        ? "Este código de barras já pertence a outro produto."
+        : "Não foi possível salvar o produto. Tente novamente.",
       true
     );
-
   } finally {
     botao.disabled = false;
-
-    botao.textContent = produtoEditandoId
-      ? "ATUALIZAR PRODUTO"
-      : "SALVAR PRODUTO";
+    botao.textContent = produtoEditandoId ? "ATUALIZAR PRODUTO" : "SALVAR PRODUTO";
   }
 }
+
 // ATIVAR OU DESATIVAR PRODUTO
 
 async function alterarStatusProduto(id) {
