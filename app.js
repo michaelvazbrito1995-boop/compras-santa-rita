@@ -600,47 +600,15 @@ async function cadastrarEmpresa(evento, uid) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // Buscar primeiro todas as cotações que ainda estão abertas.
-    const consultaCotacoes = query(
-      collection(db, "cotacoes"),
-      where("status", "==", "aberta")
-    );
-
-    const resultadoCotacoes = await getDocs(consultaCotacoes);
-    const cotacoesAbertas = resultadoCotacoes.docs;
-      // Uma gravação da empresa + uma para cada vínculo. Limite do lote: 500.
-    if (cotacoesAbertas.length > 499) {
-      throw new Error("LIMITE_COTACOES");
-    }
-
-    // Criar ID da empresa e preparar todas as gravações em um único lote.
+    // O vendedor cadastra somente a empresa. Convites e alterações em
+    // cotações são responsabilidade do administrador.
     const empresaRef = doc(collection(db, "fornecedores"));
-    const lote = writeBatch(db);
-
-    lote.set(empresaRef, {
+    await setDoc(empresaRef, {
       empresa: nome,
       responsavelUid: uid,
       ativo: true,
       criadoEm: serverTimestamp()
     });
-
-    cotacoesAbertas.forEach(cotacao => {
-      const vinculoId = cotacao.id + "__" + empresaRef.id;
-      const vinculoRef = doc(db, "cotacao_fornecedores", vinculoId);
-
-      lote.set(vinculoRef, {
-        cotacaoId: cotacao.id,
-        fornecedorId: empresaRef.id,
-        responsavelUid: uid,
-        status: "convidado",
-        criadoEm: serverTimestamp()
-      });
-      const responsaveis = [...new Set([...(cotacao.data().responsaveisUids || []), uid])];
-      lote.update(cotacao.ref, { responsaveisUids: responsaveis });
-    });
-
-    // Empresa e vínculos são confirmados juntos ou não são gravados.
-    await lote.commit();
 
     document.getElementById("form-empresa").reset();
     document.getElementById("area-cadastro-empresa").style.display = "none";
@@ -660,7 +628,7 @@ async function cadastrarEmpresa(evento, uid) {
     if (erro.message === "LIMITE_COTACOES") {
       mensagem = "Há muitas cotações abertas para cadastrar a empresa de uma só vez.";
     } else if (erro.code === "permission-denied") {
-      mensagem = "O Firebase não autorizou a operação. As regras precisam permitir o cadastro em lote.";
+      mensagem = "O Firebase não autorizou o cadastro. Confira se sua conta de vendedor está ativa e se as regras permitem cadastrar empresas.";
     }
 
     mensagemNaTela("mensagem-empresa", mensagem, true);
