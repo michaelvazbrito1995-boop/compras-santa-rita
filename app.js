@@ -1190,6 +1190,19 @@ async function abrirModuloCotacoes(conteudo) {
           <p class="ajuda-cotacao">Pesquise pelo nome ou código de barras e adicione somente o que precisa.</p>
           <label for="buscar-produto-cotacao">Buscar produto</label>
           <input id="buscar-produto-cotacao" type="search" autocomplete="off" placeholder="Digite o nome ou código de barras...">
+          <div class="cadastro-rapido-cotacao">
+            <button type="button" class="botao-secundario-cotacao" id="abrir-produto-rapido-online">+ CADASTRO RÁPIDO DE PRODUTO</button>
+            <div id="produto-rapido-online" class="produto-rapido-form" hidden>
+              <label for="produto-rapido-nome-online">Nome do produto</label>
+              <input id="produto-rapido-nome-online" maxlength="100" placeholder="Ex.: Açúcar cristal 5kg">
+              <label for="produto-rapido-unidade-online">Unidade</label>
+              <select id="produto-rapido-unidade-online"><option value="UN">UN</option><option value="KG">KG</option><option value="CX">CX</option><option value="FD">FD</option><option value="PCT">PCT</option><option value="LT">LT</option><option value="ML">ML</option><option value="GR">GR</option><option value="SC">SC</option><option value="DZ">DZ</option></select>
+              <label for="produto-rapido-codigo-online">Código de barras (opcional)</label>
+              <input id="produto-rapido-codigo-online" inputmode="numeric" placeholder="Código de barras">
+              <button type="button" id="salvar-produto-rapido-online">SALVAR E ADICIONAR</button>
+              <p id="mensagem-produto-rapido-online" role="status"></p>
+            </div>
+          </div>
           <div id="resultados-produtos-cotacao" class="resultados-cotacao">Carregando produtos...</div>
           <div class="selecionados-cotacao-wrap">
             <div class="selecionados-cotacao-titulo"><strong>Produtos selecionados</strong><span id="contador-produtos-cotacao">0 itens</span></div>
@@ -1224,6 +1237,19 @@ async function abrirModuloCotacoes(conteudo) {
   await carregarListaCotacoesAdmin();
 }
 
+async function criarProdutoRapido(nome, unidade, codigoBarras = "") {
+  const nomeLimpo = String(nome || "").trim();
+  const codigo = String(codigoBarras || "").replace(/\s+/g, "").trim();
+  if (!nomeLimpo) throw new Error("Informe o nome do produto.");
+  if (codigo) {
+    const existente = await getDocs(query(collection(db, "produtos"), where("codigoBarras", "==", codigo)));
+    if (!existente.empty) throw new Error(`Este código já está cadastrado em ${existente.docs[0].data().nome || "outro produto"}.`);
+  }
+  const dados = { nome: nomeLimpo, unidade: unidade || "UN", codigoBarras: codigo, departamento: "Não informado", categoria: "Geral", ativo: true, foto: "", criadoEm: serverTimestamp() };
+  const ref = await addDoc(collection(db, "produtos"), dados);
+  return { id: ref.id, ...dados };
+}
+
 async function abrirFormularioPresencial() {
   const area = document.getElementById("form-presencial-area");
   area.style.display = "block";
@@ -1240,12 +1266,29 @@ async function abrirFormularioPresencial() {
       <label>Título da reunião</label><input id="pres-titulo" required placeholder="Ex.: Cotação semanal - bebidas">
       <label>Data da reunião</label><input id="pres-data" type="date" required value="${new Date().toLocaleDateString('en-CA')}">
       <label>Adicionar produto</label><input id="pres-busca" type="search" placeholder="Digite nome ou código de barras" autocomplete="off">
+      <div class="cadastro-rapido-cotacao">
+        <button type="button" class="botao-secundario-cotacao" id="abrir-produto-rapido-pres">+ CADASTRO RÁPIDO DE PRODUTO</button>
+        <div id="produto-rapido-pres" class="produto-rapido-form" hidden>
+          <label for="produto-rapido-nome-pres">Nome do produto</label><input id="produto-rapido-nome-pres" maxlength="100" placeholder="Ex.: Açúcar cristal 5kg">
+          <label for="produto-rapido-unidade-pres">Unidade</label><select id="produto-rapido-unidade-pres"><option value="UN">UN</option><option value="KG">KG</option><option value="CX">CX</option><option value="FD">FD</option><option value="PCT">PCT</option><option value="LT">LT</option><option value="ML">ML</option><option value="GR">GR</option><option value="SC">SC</option><option value="DZ">DZ</option></select>
+          <label for="produto-rapido-codigo-pres">Código de barras (opcional)</label><input id="produto-rapido-codigo-pres" inputmode="numeric" placeholder="Código de barras">
+          <button type="button" id="salvar-produto-rapido-pres">SALVAR E ADICIONAR</button><p id="mensagem-produto-rapido-pres" role="status"></p>
+        </div>
+      </div>
       <div id="pres-resultados" class="resultados-cotacao"></div>
       <div id="pres-selecionados"></div>
       <div id="pres-mensagem" role="status"></div>
       <button type="submit" id="pres-salvar">FINALIZAR E SALVAR NO HISTÓRICO</button>
       <button type="button" id="pres-cancelar">CANCELAR</button></form>`;
     const selecionados=new Map();
+    document.getElementById("abrir-produto-rapido-pres").onclick=()=>{const f=document.getElementById("produto-rapido-pres");f.hidden=!f.hidden;};
+    document.getElementById("salvar-produto-rapido-pres").onclick=async()=>{
+      const b=document.getElementById("salvar-produto-rapido-pres"), msg=document.getElementById("mensagem-produto-rapido-pres");
+      b.disabled=true; b.textContent="SALVANDO...";
+      try { const pr=await criarProdutoRapido(document.getElementById("produto-rapido-nome-pres").value,document.getElementById("produto-rapido-unidade-pres").value,document.getElementById("produto-rapido-codigo-pres").value); produtos.push(pr); selecionados.set(pr.id,pr); document.getElementById("pres-busca").value=""; document.getElementById("produto-rapido-nome-pres").value=""; document.getElementById("produto-rapido-codigo-pres").value=""; msg.textContent="Produto cadastrado e adicionado à cotação!"; renderTabela(); renderBusca(); }
+      catch(e){msg.textContent=e.message||"Não foi possível cadastrar o produto.";msg.style.color="#c62828";}
+      finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
+    };
     const renderBusca=()=>{const q=normalizarTexto(document.getElementById("pres-busca").value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";document.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
     const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.titular)}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
     document.getElementById("pres-busca").addEventListener("input",renderBusca);
@@ -1310,6 +1353,13 @@ async function carregarOpcoesCotacao() {
 
     campoBusca.addEventListener("input", () => {
       renderizarResultadosProdutosCotacao(campoBusca.value);
+    });
+    document.getElementById("abrir-produto-rapido-online").addEventListener("click",()=>{const f=document.getElementById("produto-rapido-online");f.hidden=!f.hidden;});
+    document.getElementById("salvar-produto-rapido-online").addEventListener("click",async()=>{
+      const b=document.getElementById("salvar-produto-rapido-online"),msg=document.getElementById("mensagem-produto-rapido-online");b.disabled=true;b.textContent="SALVANDO...";
+      try{const pr=await criarProdutoRapido(document.getElementById("produto-rapido-nome-online").value,document.getElementById("produto-rapido-unidade-online").value,document.getElementById("produto-rapido-codigo-online").value);produtosDisponiveisCotacao.push(pr);produtosDisponiveisCotacao.sort((a,b)=>String(a.nome).localeCompare(String(b.nome),"pt-BR"));produtosSelecionadosCotacao.set(pr.id,pr);document.getElementById("produto-rapido-nome-online").value="";document.getElementById("produto-rapido-codigo-online").value="";document.getElementById("buscar-produto-cotacao").value="";renderizarProdutosSelecionadosCotacao();renderizarResultadosProdutosCotacao("");msg.textContent="Produto cadastrado e adicionado à cotação!";msg.style.color="#267326";}
+      catch(e){msg.textContent=e.message||"Não foi possível cadastrar o produto.";msg.style.color="#c62828";}
+      finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
     });
 
     areaFornecedores.innerHTML = fornecedores.length ? fornecedores.map(f => `
