@@ -17,12 +17,11 @@ import {
   addDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   serverTimestamp,
-  writeBatch,
-  arrayUnion,
-  runTransaction
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
 // FIREBASE
@@ -52,6 +51,8 @@ let todosProdutos = [];
 
 let produtoEditandoId = null;
 let paginaAtual = 0;
+let paginaCotacoesAtual = 1;
+let cotacoesAdminCache = [];
 let temProximaPagina = false;
 
 let controleSessao = 0;
@@ -599,29 +600,76 @@ async function cadastrarEmpresa(evento, uid) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // O fornecedor cadastra a empresa. O administrador escolhe os
-    // fornecedores ao criar cada nova cotação online.
-    await addDoc(collection(db, "fornecedores"), {
+    // Buscar primeiro todas as cotações que ainda estão abertas.
+    const consultaCotacoes = query(
+      collection(db, "cotacoes"),
+      where("status", "==", "aberta")
+    );
+
+    const resultadoCotacoes = await getDocs(consultaCotacoes);
+    const cotacoesAbertas = resultadoCotacoes.docs;
+      // Uma gravação da empresa + uma para cada vínculo. Limite do lote: 500.
+    if (cotacoesAbertas.length > 499) {
+      throw new Error("LIMITE_COTACOES");
+    }
+
+    // Criar ID da empresa e preparar todas as gravações em um único lote.
+    const empresaRef = doc(collection(db, "fornecedores"));
+    const lote = writeBatch(db);
+
+    lote.set(empresaRef, {
       empresa: nome,
       responsavelUid: uid,
       ativo: true,
       criadoEm: serverTimestamp()
     });
 
+    cotacoesAbertas.forEach(cotacao => {
+      const vinculoId = cotacao.id + "__" + empresaRef.id;
+      const vinculoRef = doc(db, "cotacao_fornecedores", vinculoId);
+
+      lote.set(vinculoRef, {
+        cotacaoId: cotacao.id,
+        fornecedorId: empresaRef.id,
+        responsavelUid: uid,
+        status: "convidado",
+        criadoEm: serverTimestamp()
+      });
+      const responsaveis = [...new Set([...(cotacao.data().responsaveisUids || []), uid])];
+      lote.update(cotacao.ref, { responsaveisUids: responsaveis });
+    });
+
+    // Empresa e vínculos são confirmados juntos ou não são gravados.
+    await lote.commit();
+
     document.getElementById("form-empresa").reset();
     document.getElementById("area-cadastro-empresa").style.display = "none";
-    mensagemNaTela("mensagem-empresa", "Empresa cadastrada com sucesso!");
+
+    mensagemNaTela(
+      "mensagem-empresa",
+      "Empresa cadastrada com sucesso!"
+    );
+
     await carregarEmpresas(uid);
 
   } catch (erro) {
     console.error("Erro ao cadastrar empresa:", erro);
-    const mensagem = erro.code === "permission-denied"
-      ? "O Firebase não autorizou o cadastro. Verifique as regras de segurança."
-      : "Não foi possível cadastrar a empresa. Tente novamente.";
+
+    let mensagem = "Não foi possível cadastrar a empresa. Verifique as regras do Firebase.";
+
+    if (erro.message === "LIMITE_COTACOES") {
+      mensagem = "Há muitas cotações abertas para cadastrar a empresa de uma só vez.";
+    } else if (erro.code === "permission-denied") {
+      mensagem = "O Firebase não autorizou a operação. As regras precisam permitir o cadastro em lote.";
+    }
+
     mensagemNaTela("mensagem-empresa", mensagem, true);
+
   } finally {
-    botao.disabled = false;
-    botao.textContent = "SALVAR EMPRESA";
+    if (botao) {
+      botao.disabled = false;
+      botao.textContent = "SALVAR EMPRESA";
+    }
   }
 }
 
@@ -1196,48 +1244,15 @@ async function abrirModuloCotacoes(conteudo) {
 
 async function criarProdutoRapido(nome, unidade, codigoBarras = "") {
   const nomeLimpo = String(nome || "").trim();
-  const codigo = String(codigoBarras || "").replace(/\D/g, "");
+  const codigo = String(codigoBarras || "").replace(/\s+/g, "").trim();
   if (!nomeLimpo) throw new Error("Informe o nome do produto.");
-
   if (codigo) {
-    const existente = await getDocs(query(
-      collection(db, "produtos"),
-      where("codigoBarras", "==", codigo)
-    ));
-    if (!existente.empty) {
-      throw new Error(`Este código já está cadastrado em ${existente.docs[0].data().nome || "outro produto"}.`);
-    }
+    const existente = await getDocs(query(collection(db, "produtos"), where("codigoBarras", "==", codigo)));
+    if (!existente.empty) throw new Error(`Este código já está cadastrado em ${existente.docs[0].data().nome || "outro produto"}.`);
   }
-
-  const produtoRef = doc(collection(db, "produtos"));
-  const dados = {
-    nome: nomeLimpo,
-    unidade: unidade || "UN",
-    codigoBarras: codigo,
-    departamento: "Não informado",
-    categoria: "Geral",
-    ativo: true,
-    foto: "",
-    criadoEm: serverTimestamp()
-  };
-
-  await runTransaction(db, async transacao => {
-    const codigoRef = codigo ? doc(db, "codigos_barras", codigo) : null;
-    const codigoSnap = codigoRef ? await transacao.get(codigoRef) : null;
-    if (codigoSnap?.exists()) {
-      throw new Error("CODIGO_BARRAS_DUPLICADO");
-    }
-    transacao.set(produtoRef, dados);
-    if (codigoRef) {
-      transacao.set(codigoRef, {
-        produtoId: produtoRef.id,
-        codigoBarras: codigo,
-        atualizadoEm: serverTimestamp()
-      });
-    }
-  });
-
-  return { id: produtoRef.id, ...dados };
+  const dados = { nome: nomeLimpo, unidade: unidade || "UN", codigoBarras: codigo, departamento: "Não informado", categoria: "Geral", ativo: true, foto: "", criadoEm: serverTimestamp() };
+  const ref = await addDoc(collection(db, "produtos"), dados);
+  return { id: ref.id, ...dados };
 }
 
 async function abrirFormularioPresencial() {
@@ -1426,7 +1441,10 @@ function renderizarProdutosSelecionadosCotacao() {
   area.innerHTML = selecionados.map(p => `
     <div class="produto-selecionado-cotacao">
       <input type="checkbox" name="cotacao-produto" value="${escaparHTML(p.id)}" checked hidden>
-      <span><strong>${escaparHTML(p.nome)}</strong><small>${escaparHTML(p.unidade || "UN")}</small></span>
+      <span><strong>${escaparHTML(p.nome)}</strong><small>${escaparHTML(p.codigoBarras || "Sem código")} · ${escaparHTML(p.unidade || "UN")}</small></span>
+      <label class="qtd-cotacao-label">Quantidade
+        <input type="number" min="0.001" step="0.001" value="1" data-qtd-cotacao="${escaparHTML(p.id)}" required style="width:95px">
+      </label>
       <button type="button" data-remover-produto-cotacao="${escaparHTML(p.id)}" aria-label="Remover ${escaparHTML(p.nome)}">REMOVER</button>
     </div>`).join("");
 
@@ -1466,20 +1484,17 @@ async function salvarCotacao(evento) {
       getDocs(collection(db, "fornecedores"))
     ]);
     const produtos = prodSnap.docs.filter(d => produtoIds.includes(d.id)).map(d => ({
-      produtoId: d.id, nome: d.data().nome || "", unidade: d.data().unidade || "UN"
+      produtoId: d.id, nome: d.data().nome || "", descricao: d.data().descricao || "", codigoBarras: d.data().codigoBarras || "", unidade: d.data().unidade || "UN",
+      quantidade: Number(document.querySelector(`[data-qtd-cotacao="${CSS.escape(d.id)}"]`)?.value || 1)
     }));
     const fornecedores = fornSnap.docs.filter(d => fornecedorIds.includes(d.id) && d.data().ativo === true);
     if (fornecedores.length !== fornecedorIds.length) throw new Error("FORNECEDOR_INATIVO");
 
     const cotacaoRef = doc(collection(db, "cotacoes"));
+    const responsaveisUids = [...new Set(fornecedores.map(f => f.data().responsavelUid).filter(Boolean))];
     const lote = writeBatch(db);
-    const responsaveisUids = [...new Set(
-      fornecedores.map(f => f.data().responsavelUid).filter(Boolean)
-    )];
-
     lote.set(cotacaoRef, {
-      titulo, descricao, prazo: prazo.toISOString(), produtos,
-      responsaveisUids,
+      titulo, descricao, prazo: prazo.toISOString(), produtos, responsaveisUids,
       status: "aberta", criadoEm: serverTimestamp(),
       criadoPor: auth.currentUser?.uid || ""
     });
@@ -1509,36 +1524,28 @@ async function salvarCotacao(evento) {
 }
 
 async function carregarListaCotacoesAdmin() {
-  const area = document.getElementById("lista-cotacoes-admin");
-  if (!area) return;
-  try {
-    const [snap, presencialSnap] = await Promise.all([getDocs(collection(db, "cotacoes")), getDocs(collection(db, "cotacoes_presenciais"))]);
-    const cotacoes = snap.docs.map(d => ({ id: d.id, ...d.data(), tipoLista: "online" }));
-    const presenciais = presencialSnap.docs.map(d => ({ id: d.id, ...d.data(), tipoLista: "presencial" }));
-    const todas = [...cotacoes, ...presenciais].sort((a,b) => (b.criadoEm?.seconds || 0) - (a.criadoEm?.seconds || 0));
-    area.innerHTML = todas.length ? todas.map(c => c.tipoLista === "presencial" ? `
-      <div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo || "Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data || "—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button></div>` : `
-      <div class="aviso-modulo" style="margin:12px 0">
-        <strong>${escaparHTML(c.titulo || "Cotação")}</strong>
-        <p>Status: <strong>${c.status === "aberta" ? "Aberta" : "Encerrada"}</strong></p>
-        <p>Produtos: ${(c.produtos || []).length}</p>
-        <p>Prazo: ${c.prazo ? new Date(c.prazo).toLocaleString("pt-BR") : "Não informado"}</p>
-        ${c.descricao ? `<p>${escaparHTML(c.descricao)}</p>` : ""}
-        ${c.status === "aberta" ? `<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR COTAÇÃO</button>` : ""}
-      </div>`).join("") : '<div class="aviso-modulo">Nenhuma cotação cadastrada.</div>';
-    area.querySelectorAll("[data-detalhes-presencial]").forEach(b => b.addEventListener("click", () => abrirDetalhesPresencial(b.dataset.detalhesPresencial)));
-    area.querySelectorAll("[data-encerrar-cotacao]").forEach(b => b.addEventListener("click", async () => {
-      if (!confirm("Deseja encerrar esta cotação?")) return;
-      try {
-        await updateDoc(doc(db, "cotacoes", b.dataset.encerrarCotacao), { status: "encerrada" });
-        await carregarListaCotacoesAdmin();
-      } catch (e) { console.error(e); alert("Não foi possível encerrar a cotação."); }
-    }));
-  } catch (erro) {
-    console.error(erro);
-    area.textContent = "Não foi possível carregar as cotações.";
-  }
+ const area=document.getElementById("lista-cotacoes-admin");if(!area)return;
+ try{const [snap,ps]=await Promise.all([getDocs(collection(db,"cotacoes")),getDocs(collection(db,"cotacoes_presenciais"))]);
+ cotacoesAdminCache=[...snap.docs.map(d=>({id:d.id,...d.data(),tipoLista:"online"})),...ps.docs.map(d=>({id:d.id,...d.data(),tipoLista:"presencial"}))].sort((a,b)=>(b.criadoEm?.seconds||0)-(a.criadoEm?.seconds||0));paginaCotacoesAtual=1;
+ area.innerHTML=`<div class="filtro-cotacoes"><button type="button" id="migrar-acessos-cotacoes">ATUALIZAR ACESSO DOS FORNECEDORES</button><label>Filtrar por data <input type="date" id="filtro-data-cotacoes"></label><button type="button" id="limpar-filtro-cotacoes">LIMPAR</button></div><div id="cotacoes-pagina"></div><div class="paginacao-cotacoes"><button type="button" id="cotacoes-anterior">ANTERIOR</button><span id="cotacoes-pagina-info"></span><button type="button" id="cotacoes-proxima">PRÓXIMA</button></div>`;
+ const render=()=>{const data=document.getElementById("filtro-data-cotacoes")?.value||"";const lista=cotacoesAdminCache.filter(c=>!data||String(c.data||c.criadoEm?.toDate?.().toLocaleDateString("en-CA")||"").slice(0,10)===data);const paginas=Math.max(1,Math.ceil(lista.length/4));paginaCotacoesAtual=Math.min(paginaCotacoesAtual,paginas);const vis=lista.slice((paginaCotacoesAtual-1)*4,paginaCotacoesAtual*4);document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-presencial="${escaparHTML(c.id)}">BAIXAR IMAGEM</button><button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="aberta"?"Aberta":"Encerrada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-online="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button></div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação encontrada nesta data.</div>';document.getElementById("cotacoes-pagina-info").textContent=`Página ${paginaCotacoesAtual} de ${paginas} · ${lista.length} cotações`;document.getElementById("cotacoes-anterior").disabled=paginaCotacoesAtual===1;document.getElementById("cotacoes-proxima").disabled=paginaCotacoesAtual>=paginas;
+ document.querySelectorAll("[data-detalhes-presencial]").forEach(b=>b.onclick=()=>abrirDetalhesPresencial(b.dataset.detalhesPresencial));document.querySelectorAll("[data-encerrar-cotacao]").forEach(b=>b.onclick=async()=>{if(confirm("Deseja encerrar esta cotação?")){await updateDoc(doc(db,"cotacoes",b.dataset.encerrarCotacao),{status:"encerrada"});await carregarListaCotacoesAdmin();}});
+ document.querySelectorAll("[data-excluir-online]").forEach(b=>b.onclick=()=>excluirCotacaoOnline(b.dataset.excluirOnline));document.querySelectorAll("[data-excluir-presencial]").forEach(b=>b.onclick=async()=>{if(!confirm("Excluir permanentemente esta cotação presencial?"))return;try{await deleteDoc(doc(db,"cotacoes_presenciais",b.dataset.excluirPresencial));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir. Confira as regras do Firestore.");}});
+ document.querySelectorAll("[data-exportar-online]").forEach(b=>b.onclick=()=>exportarCotacao("online",b.dataset.exportarOnline));document.querySelectorAll("[data-exportar-presencial]").forEach(b=>b.onclick=()=>exportarCotacao("presencial",b.dataset.exportarPresencial));document.querySelectorAll("[data-imagem-online]").forEach(b=>b.onclick=()=>baixarImagemCotacao("online",b.dataset.imagemOnline));document.querySelectorAll("[data-imagem-presencial]").forEach(b=>b.onclick=()=>baixarImagemCotacao("presencial",b.dataset.imagemPresencial));};
+ document.getElementById("migrar-acessos-cotacoes").onclick=migrarAcessosCotacoes;document.getElementById("filtro-data-cotacoes").onchange=()=>{paginaCotacoesAtual=1;render();};document.getElementById("limpar-filtro-cotacoes").onclick=()=>{document.getElementById("filtro-data-cotacoes").value="";paginaCotacoesAtual=1;render();};document.getElementById("cotacoes-anterior").onclick=()=>{paginaCotacoesAtual--;render();};document.getElementById("cotacoes-proxima").onclick=()=>{paginaCotacoesAtual++;render();};render();
+ }catch(e){console.error(e);area.textContent="Não foi possível carregar as cotações.";}
 }
+
+async function migrarAcessosCotacoes(){
+ if(!confirm("Atualizar o acesso de fornecedores em todas as cotações antigas? Isso apenas adiciona a lista de responsáveis com base nos vínculos já existentes."))return;
+ try{const [cotSnap,vincSnap]=await Promise.all([getDocs(collection(db,"cotacoes")),getDocs(collection(db,"cotacao_fornecedores"))]);const porCotacao=new Map();vincSnap.docs.forEach(d=>{const v=d.data();if(!v.cotacaoId||!v.responsavelUid)return;if(!porCotacao.has(v.cotacaoId))porCotacao.set(v.cotacaoId,new Set());porCotacao.get(v.cotacaoId).add(v.responsavelUid);});let atualizadas=0;for(const c of cotSnap.docs){const uids=[...(porCotacao.get(c.id)||[])];if(uids.length){const atuais=c.data().responsaveisUids||[];const unidos=[...new Set([...atuais,...uids])];if(JSON.stringify([...atuais].sort())!==JSON.stringify([...unidos].sort())){await updateDoc(c.ref,{responsaveisUids:unidos});atualizadas++;}}}alert(`Migração concluída. ${atualizadas} cotação(ões) atualizada(s).`);await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível migrar. Confira se as regras atuais permitem ao administrador atualizar as cotações.");}}
+
+async function excluirCotacaoOnline(id){if(!confirm("Excluir esta cotação e todas as respostas/vínculos relacionados? Esta ação não pode ser desfeita."))return;try{const [vs,rs]=await Promise.all([getDocs(query(collection(db,"cotacao_fornecedores"),where("cotacaoId","==",id))),getDocs(query(collection(db,"respostas"),where("cotacaoId","==",id)))]);const docs=[...vs.docs,...rs.docs];for(let i=0;i<docs.length;i+=450){const batch=writeBatch(db);docs.slice(i,i+450).forEach(d=>batch.delete(d.ref));await batch.commit();}await deleteDoc(doc(db,"cotacoes",id));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir a cotação. Confira as regras do Firestore.");}}
+
+
+async function baixarImagemCotacao(tipo,id){try{const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));if(!snap.exists())throw new Error("Cotação não encontrada");const c=snap.data(), itens=tipo==="online"?(c.produtos||[]):(c.itens||[]);const linhaH=48,altura=Math.min(12000,210+itens.length*linhaH);const canvas=document.createElement("canvas");canvas.width=1400;canvas.height=altura;const ctx=canvas.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,canvas.width,canvas.height);ctx.fillStyle="#222";ctx.font="bold 34px Arial";ctx.fillText("COMPRAS SANTA RITA",55,60);ctx.font="bold 27px Arial";ctx.fillText(String(c.titulo||"Cotação").slice(0,65),55,108);ctx.font="18px Arial";ctx.fillText(`Tipo: ${tipo==="online"?"Online":"Presencial"}   Data: ${c.data||"—"}   Gerado: ${new Date().toLocaleString("pt-BR")}`,55,145);ctx.fillStyle="#f2c928";ctx.fillRect(50,175,1300,42);ctx.fillStyle="#222";ctx.font="bold 17px Arial";const cols=tipo==="online"?[55,570,930,1110]:[55,620,790,970,1150];const heads=tipo==="online"?["Produto","Código de barras","Unidade","Quantidade"]:["Produto","Unidade","Qtd.","Preço","Total"];heads.forEach((h,i)=>ctx.fillText(h,cols[i],203));ctx.font="16px Arial";itens.forEach((it,i)=>{const y=245+i*linhaH;if(y>altura-15)return;ctx.strokeStyle="#ddd";ctx.beginPath();ctx.moveTo(50,y-23);ctx.lineTo(1350,y-23);ctx.stroke();const vals=tipo==="online"?[it.nome,it.codigoBarras||"—",it.unidade||"UN",String(it.quantidade||1)]:[it.nome,it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})];vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,42),cols[j],y));});const a=document.createElement("a");a.download=`cotacao-${tipo}-${id}.png`;a.href=canvas.toDataURL("image/png");a.click();}catch(e){console.error(e);alert(e.message||"Não foi possível gerar a imagem.");}}
+
+async function exportarCotacao(tipo,id){try{const snap=await getDoc(doc(db,tipo==="online"?"cotacoes":"cotacoes_presenciais",id));if(!snap.exists())throw new Error("Cotação não encontrada");const c=snap.data();const dataHora=c.criadoEm?.toDate?c.criadoEm.toDate().toLocaleString("pt-BR"):new Date().toLocaleString("pt-BR");let linhas="";if(tipo==="online"){linhas=(c.produtos||[]).map(p=>`<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${Number(p.quantidade||1).toLocaleString("pt-BR")}</td></tr>`).join("");}else{linhas=(c.itens||[]).map(p=>`<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`).join("");}const headers=tipo==="online"?"<th>Produto</th><th>Código de barras</th><th>Un.</th><th>Quantidade</th>":"<th>Produto</th><th>Un.</th><th>Qtd.</th><th>Preço</th><th>Total</th>";const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(c.titulo||"Cotação")}</title><style>body{font:14px Arial;padding:28px;color:#222}h1{color:#333}small{color:#555}.meta{margin:16px 0}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #bbb;padding:9px;text-align:left}th{background:#f2c928} @media print{button{display:none}body{padding:0}}</style><h1>Compras Santa Rita</h1><h2>${escaparHTML(c.titulo||"Cotação")}</h2><div class="meta">Tipo: ${tipo==="online"?"Online":"Presencial"}<br>Data: ${escaparHTML(c.data||dataHora)}<br>Gerado em: ${dataHora}<br>Status: ${escaparHTML(c.status||"Finalizada")}</div>${c.descricao?`<p><b>Observações:</b> ${escaparHTML(c.descricao)}</p>`:""}<table><thead><tr>${headers}</tr></thead><tbody>${linhas}</tbody></table>${tipo==="presencial"?`<h3>Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</h3>`:""}<p style="margin-top:30px;font-size:11px">Documento gerado pelo sistema Compras Santa Rita.</p><button onclick="window.print()">Salvar como PDF / Imprimir</button></html>`;const w=window.open("","_blank");if(!w)throw new Error("Permita pop-ups para exportar a cotação.");w.document.write(html);w.document.close();}catch(e){console.error(e);alert(e.message||"Não foi possível exportar.");}}
 
 // MÓDULO DE RESPOSTAS — COMPARAÇÃO DE PREÇOS
 
@@ -1576,36 +1583,26 @@ async function carregarRespostasAdmin() {
   try {
     const filtro = document.getElementById("filtro-cotacao-respostas")?.value || "";
     const snap = await getDocs(collection(db, "respostas"));
-    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(r => !filtro || r.cotacaoId === filtro);
-    if (!respostas.length) {
-      area.innerHTML = '<div class="aviso-modulo">Ainda não há respostas para esta seleção.</div>';
-      return;
-    }
+    const respostas = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => !filtro || r.cotacaoId === filtro);
+    if (!respostas.length) { area.innerHTML = '<div class="aviso-modulo">Ainda não há respostas para esta seleção.</div>'; return; }
     const enriquecidas = await Promise.all(respostas.map(async r => {
-      const [cot, forn] = await Promise.all([
-        getDoc(doc(db, "cotacoes", r.cotacaoId)),
-        getDoc(doc(db, "fornecedores", r.fornecedorId))
+      const [cot, forn, usuario] = await Promise.all([
+        getDoc(doc(db, "cotacoes", r.cotacaoId)), getDoc(doc(db, "fornecedores", r.fornecedorId)),
+        r.responsavelUid ? getDoc(doc(db,"usuarios",r.responsavelUid)) : Promise.resolve(null)
       ]);
-      return { ...r, titulo: cot.exists() ? cot.data().titulo : "Cotação", empresa: forn.exists() ? forn.data().empresa : "Fornecedor" };
+      return { ...r, titulo: cot?.exists() ? cot.data().titulo : "Cotação", empresa: forn?.exists() ? forn.data().empresa : "Empresa removida", responsavel: usuario?.exists() ? usuario.data().nome : "" };
     }));
     area.innerHTML = enriquecidas.map(r => `
-      <div class="aviso-modulo" style="margin:12px 0">
-        <strong>${escaparHTML(r.titulo)} — ${escaparHTML(r.empresa)}</strong>
-        ${(r.itens || []).map(item => `
-          <div style="border-top:1px solid #e5e5e5;padding:9px 0">
-            <strong>${escaparHTML(item.nome)}</strong>
-            <p>Marca: ${escaparHTML(item.marca || "Não informada")}</p>
-            <p>Preço: ${Number(item.preco || 0).toLocaleString("pt-BR", {style:"currency",currency:"BRL"})}</p>
-            ${item.observacao ? `<p>${escaparHTML(item.observacao)}</p>` : ""}
-          </div>`).join("")}
-        ${r.observacaoGeral ? `<p>Observações: ${escaparHTML(r.observacaoGeral)}</p>` : ""}
+      <div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(r.titulo)} — ${escaparHTML(r.empresa)}</strong>
+        ${r.responsavel ? `<p>Responsável: ${escaparHTML(r.responsavel)}</p>` : ""}
+        ${(r.itens || []).map(item => `<div style="border-top:1px solid #e5e5e5;padding:9px 0"><strong>${escaparHTML(item.nome)}</strong>
+          <p>${escaparHTML(item.descricao||"")}</p><p>Código: ${escaparHTML(item.codigoBarras||"—")} · Unidade: ${escaparHTML(item.unidade||"UN")} · Quantidade: ${Number(item.quantidade||1).toLocaleString("pt-BR")}</p>
+          ${item.indisponivel ? '<p><b>Produto indisponível</b></p>' : `<p>Preço unitário: ${Number(item.preco||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</p>`}
+          ${item.observacao ? `<p>Observação comercial: ${escaparHTML(item.observacao)}</p>` : ""}</div>`).join("")}
+        ${r.observacaoGeral ? `<p>Observação geral: ${escaparHTML(r.observacaoGeral)}</p>` : ""}
         <p>Enviada: ${r.enviadoEm?.toDate ? r.enviadoEm.toDate().toLocaleString("pt-BR") : "—"}</p>
       </div>`).join("");
-  } catch (erro) {
-    console.error(erro);
-    area.textContent = "Não foi possível carregar as respostas.";
-  }
+  } catch (erro) { console.error(erro); area.textContent = "Não foi possível carregar as respostas."; }
 }
 
 // MÓDULO DE USUÁRIOS
@@ -1636,7 +1633,7 @@ async function carregarUsuariosAdmin() {
         <p>Telefone: ${escaparHTML(u.telefone || "Não informado")}</p>
         <p>E-mail: ${escaparHTML(u.email || "Não informado")}</p>
         <p>Status: <strong style="color:${u.ativo === true ? "#267326" : "#c62828"}">${u.ativo === true ? "Ativo" : "Bloqueado"}</strong></p>
-        ${u.perfil !== "admin" && u.id !== auth.currentUser?.uid ? `<button type="button" data-status-usuario="${escaparHTML(u.id)}">${u.ativo === true ? "BLOQUEAR USUÁRIO" : "ATIVAR USUÁRIO"}</button>` : ""}
+        ${u.perfil !== "admin" && u.id !== auth.currentUser?.uid ? `<button type="button" data-status-usuario="${escaparHTML(u.id)}">${u.ativo === true ? "BLOQUEAR USUÁRIO" : "ATIVAR USUÁRIO"}</button><button type="button" data-excluir-usuario="${escaparHTML(u.id)}">EXCLUIR CADASTRO</button>` : ""}
       </div>`).join("") : '<div class="aviso-modulo">Nenhum usuário cadastrado.</div>';
     area.querySelectorAll("[data-status-usuario]").forEach(b => b.addEventListener("click", async () => {
       const id = b.dataset.statusUsuario;
@@ -1648,6 +1645,7 @@ async function carregarUsuariosAdmin() {
         await carregarUsuariosAdmin();
       } catch (e) { console.error(e); alert("Não foi possível alterar o usuário."); }
     }));
+    area.querySelectorAll("[data-excluir-usuario]").forEach(b=>b.addEventListener("click",async()=>{const id=b.dataset.excluirUsuario;if(!confirm("Excluir o cadastro deste vendedor e as empresas vinculadas? A conta de login do Firebase Authentication não será apagada por esta ação."))return;try{const fs=await getDocs(query(collection(db,"fornecedores"),where("responsavelUid","==",id)));for(const f of fs.docs)await deleteDoc(f.ref);await deleteDoc(doc(db,"usuarios",id));await carregarUsuariosAdmin();}catch(e){console.error(e);alert("Não foi possível excluir. Confira as regras do Firestore.");}}));
   } catch (erro) {
     console.error(erro);
     area.textContent = "Não foi possível carregar os usuários.";
@@ -1657,43 +1655,17 @@ async function carregarUsuariosAdmin() {
 // COTAÇÕES RECEBIDAS — ÁREA DO VENDEDOR
 
 async function carregarCotacoesFornecedor(uid) {
-  const area = document.getElementById("lista-cotacoes-fornecedor");
-  if (!area) return;
+  const area = document.getElementById("lista-cotacoes-fornecedor"); if (!area) return;
   try {
-    const vinculosSnap = await getDocs(query(
-      collection(db, "cotacao_fornecedores"),
-      where("responsavelUid", "==", uid)
-    ));
-    const vinculos = vinculosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (!vinculos.length) {
-      area.innerHTML = '<div class="aviso-modulo">Você ainda não recebeu cotações.</div>';
-      return;
-    }
-    const registros = await Promise.all(vinculos.map(async v => {
-      const [cotSnap, fornSnap] = await Promise.all([
-        getDoc(doc(db, "cotacoes", v.cotacaoId)),
-        getDoc(doc(db, "fornecedores", v.fornecedorId))
-      ]);
-      return { ...v, cotacao: cotSnap.exists() ? { id: cotSnap.id, ...cotSnap.data() } : null,
-        fornecedor: fornSnap.exists() ? fornSnap.data() : null };
-    }));
-    const validos = registros.filter(r => r.cotacao && r.fornecedor?.ativo === true);
-    area.innerHTML = validos.length ? validos.map(r => `
-      <div class="aviso-modulo" style="margin:12px 0">
-        <strong>${escaparHTML(r.cotacao.titulo)}</strong>
-        <p>Empresa: ${escaparHTML(r.fornecedor.empresa || "Empresa")}</p>
-        <p>Status: ${r.cotacao.status === "aberta" ? "Aberta" : "Encerrada"}</p>
-        <p>Prazo: ${r.cotacao.prazo ? new Date(r.cotacao.prazo).toLocaleString("pt-BR") : "—"}</p>
-        ${r.cotacao.status === "aberta" && (!r.cotacao.prazo || new Date(r.cotacao.prazo) > new Date()) ?
-          `<button type="button" data-responder-cotacao="${escaparHTML(r.cotacao.id)}" data-fornecedor-id="${escaparHTML(r.fornecedorId)}">RESPONDER COTAÇÃO</button>` :
-          "<p>Esta cotação não está mais recebendo respostas.</p>"}
-      </div>`).join("") : '<div class="aviso-modulo">Não há cotações abertas para suas empresas.</div>';
-    area.querySelectorAll("[data-responder-cotacao]").forEach(b => b.addEventListener("click", () =>
-      abrirFormularioResposta(b.dataset.responderCotacao, b.dataset.fornecedorId)));
-  } catch (erro) {
-    console.error("Erro ao carregar cotações do fornecedor:", erro);
-    area.textContent = "Não foi possível carregar as cotações.";
-  }
+    const vinculosSnap = await getDocs(query(collection(db,"cotacao_fornecedores"),where("responsavelUid","==",uid)));
+    const vinculos = vinculosSnap.docs.map(d=>({id:d.id,...d.data()}));
+    if(!vinculos.length){area.innerHTML='<div class="aviso-modulo">Você ainda não recebeu cotações.</div>';return;}
+    const registros=await Promise.all(vinculos.map(async v=>{const [cotSnap,fornSnap]=await Promise.all([getDoc(doc(db,"cotacoes",v.cotacaoId)),getDoc(doc(db,"fornecedores",v.fornecedorId))]);return {...v,cotacao:cotSnap.exists()?{id:cotSnap.id,...cotSnap.data()}:null,fornecedor:fornSnap.exists()?fornSnap.data():null};}));
+    const agrupados=new Map();registros.filter(r=>r.cotacao&&r.fornecedor?.ativo===true).forEach(r=>{if(!agrupados.has(r.cotacaoId))agrupados.set(r.cotacaoId,{cotacao:r.cotacao,empresas:[]});agrupados.get(r.cotacaoId).empresas.push(r);});
+    const lista=[...agrupados.values()].sort((a,b)=>new Date(b.cotacao.prazo||0)-new Date(a.cotacao.prazo||0));
+    area.innerHTML=lista.length?lista.map(g=>{const c=g.cotacao,aberta=c.status==="aberta"&&(!c.prazo||new Date(c.prazo)>new Date());return `<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo)}</strong><p>Status: ${aberta?"Aberta":"Encerrada"} · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"—"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}<p><b>Responder por empresa:</b></p>${g.empresas.map(r=>`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0"><span>${escaparHTML(r.fornecedor.empresa||"Empresa")}</span><span>${r.status==="respondido"?"· Já respondida":"· Pendente"}</span>${aberta?`<button type="button" data-responder-cotacao="${escaparHTML(c.id)}" data-fornecedor-id="${escaparHTML(r.fornecedorId)}">${r.status==="respondido"?"EDITAR RESPOSTA":"RESPONDER"}</button>`:""}</div>`).join("")}${!aberta?"<p>Esta cotação não está mais recebendo respostas.</p>":""}</div>`;}).join(""):'<div class="aviso-modulo">Não há cotações para suas empresas.</div>';
+    area.querySelectorAll("[data-responder-cotacao]").forEach(b=>b.addEventListener("click",()=>abrirFormularioResposta(b.dataset.responderCotacao,b.dataset.fornecedorId)));
+  }catch(erro){console.error("Erro ao carregar cotações do fornecedor:",erro);area.textContent="Não foi possível carregar as cotações.";}
 }
 
 async function abrirFormularioResposta(cotacaoId, fornecedorId) {
@@ -1703,80 +1675,54 @@ async function abrirFormularioResposta(cotacaoId, fornecedorId) {
     const snap = await getDoc(doc(db, "cotacoes", cotacaoId));
     if (!snap.exists()) throw new Error("Cotação não encontrada.");
     const cot = snap.data();
-    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) {
-      alert("O prazo desta cotação terminou.");
-      return;
-    }
-    area.style.display = "block";
-    area.dataset.cotacaoId = cotacaoId;
-    area.dataset.fornecedorId = fornecedorId;
+    if (cot.status !== "aberta" || (cot.prazo && new Date(cot.prazo) <= new Date())) { alert("O prazo desta cotação terminou."); return; }
+    const vinculoSnap = await getDoc(doc(db,"cotacao_fornecedores",cotacaoId+"__"+fornecedorId));
+    if(!vinculoSnap.exists()||vinculoSnap.data().responsavelUid!==auth.currentUser?.uid)throw new Error("Acesso não autorizado a esta empresa.");
+    const respostaAnteriorSnap = await getDoc(doc(db,"respostas",cotacaoId+"__"+fornecedorId));
+    const respostaAnterior = respostaAnteriorSnap.exists() ? respostaAnteriorSnap.data() : null;
+    area.style.display = "block"; area.dataset.cotacaoId = cotacaoId; area.dataset.fornecedorId = fornecedorId;
     area.innerHTML = `
       <h3>Responder: ${escaparHTML(cot.titulo)}</h3>
+      ${cot.descricao ? `<div class="aviso-modulo"><strong>Observações da cotação</strong><p>${escaparHTML(cot.descricao)}</p></div>` : ""}
       <form id="form-resposta">
-        ${(cot.produtos || []).map((p,i) => `
-          <div class="aviso-modulo" style="margin:10px 0">
-            <strong>${escaparHTML(p.nome)}</strong>
-            <p>Unidade: ${escaparHTML(p.unidade || "UN")}</p>
-            <label>Marca</label><input name="marca-${i}" placeholder="Marca oferecida">
-            <label>Preço unitário (R$)</label><input name="preco-${i}" type="number" min="0.01" step="0.01" required>
-            <label>Observação</label><input name="obs-${i}" placeholder="Opcional">
-          </div>`).join("")}
-        <label>Observação geral</label>
-        <textarea id="resposta-observacao-geral" rows="3"></textarea>
+        <div id="resposta-itens-pagina"></div>
+        <div class="paginacao-resposta"><button type="button" id="resposta-anterior">ANTERIOR</button><span id="resposta-pagina-info"></span><button type="button" id="resposta-proxima">PRÓXIMA</button></div>
+        <label>Observação geral da proposta</label><textarea id="resposta-observacao-geral" rows="3" placeholder="Condições comerciais gerais">${escaparHTML(respostaAnterior?.observacaoGeral||"")}</textarea>
         <button type="submit" id="enviar-resposta">ENVIAR RESPOSTA</button>
-        <button type="button" id="cancelar-resposta">CANCELAR</button>
-        <p id="mensagem-resposta"></p>
+        <button type="button" id="cancelar-resposta">CANCELAR</button><p id="mensagem-resposta"></p>
       </form>`;
-    document.getElementById("cancelar-resposta").addEventListener("click", () => {
-      area.style.display = "none"; area.innerHTML = "";
-    });
+    const porPagina=10; let pagina=0; const total=(cot.produtos||[]).length; const rascunho=new Map(); (respostaAnterior?.itens||[]).forEach((it,i)=>rascunho.set(i,{indisponivel:!!it.indisponivel,preco:it.preco==null?"":String(it.preco),observacao:it.observacao||""})); area._rascunho=rascunho;
+    const guardarPagina=()=>{document.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);rascunho.set(n,{indisponivel:!!bloco.querySelector(".item-indisponivel")?.checked,preco:bloco.querySelector(`[name="preco-${n}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}"]`)?.value||""});});};
+    const render=()=>{const inicio=pagina*porPagina;const itens=(cot.produtos||[]).slice(inicio,inicio+porPagina);
+      document.getElementById("resposta-itens-pagina").innerHTML=itens.map((p,i)=>{const n=inicio+i;return `<div class="aviso-modulo resposta-item" data-resposta-item="${n}" style="margin:10px 0">
+        <strong>${escaparHTML(p.nome)}</strong><p>${escaparHTML(p.descricao||"")}</p>
+        <p>Código de barras: ${escaparHTML(p.codigoBarras||"Não informado")} · Unidade: ${escaparHTML(p.unidade||"UN")} · Quantidade solicitada: <b>${Number(p.quantidade||1).toLocaleString("pt-BR")}</b></p>
+        <label class="indisponivel-label"><input type="checkbox" name="indisponivel-${n}" class="item-indisponivel"> Produto indisponível</label>
+        <label>Preço unitário (R$)</label><input name="preco-${n}" type="number" min="0.01" step="0.01" placeholder="Informe o preço">
+        <label>Observação comercial</label><input name="obs-${n}" placeholder="Ex.: bonificação acima de determinada quantidade">
+      </div>`;}).join("");
+      itens.forEach((p,i)=>{const n=inicio+i,d=rascunho.get(n);if(!d)return;const bloco=document.querySelector(`[data-resposta-item="${n}"]`);if(bloco){bloco.querySelector(".item-indisponivel").checked=d.indisponivel;bloco.querySelector(`[name="preco-${n}"]`).value=d.preco;bloco.querySelector(`[name="obs-${n}"]`).value=d.observacao;}});
+      document.getElementById("resposta-pagina-info").textContent=`Página ${pagina+1} de ${Math.max(1,Math.ceil(total/porPagina))}`;
+      document.getElementById("resposta-anterior").disabled=pagina===0;document.getElementById("resposta-proxima").disabled=(pagina+1)*porPagina>=total;
+    };
+    document.getElementById("resposta-anterior").onclick=()=>{guardarPagina();pagina--;render();};document.getElementById("resposta-proxima").onclick=()=>{guardarPagina();pagina++;render();};render();
+    document.getElementById("cancelar-resposta").onclick=()=>{area.style.display="none";area.innerHTML="";};
     document.getElementById("form-resposta").addEventListener("submit", enviarRespostaFornecedor);
-  } catch (erro) {
-    console.error(erro);
-    alert("Não foi possível abrir esta cotação.");
-  }
+  } catch (erro) { console.error(erro); alert("Não foi possível abrir esta cotação."); }
 }
 
 async function enviarRespostaFornecedor(evento) {
   evento.preventDefault();
-  const area = document.getElementById("form-resposta-fornecedor");
-  const cotacaoId = area.dataset.cotacaoId;
-  const fornecedorId = area.dataset.fornecedorId;
-  const cotSnap = await getDoc(doc(db, "cotacoes", cotacaoId));
-  if (!cotSnap.exists() || cotSnap.data().status !== "aberta") {
-    mensagemNaTela("mensagem-resposta", "Esta cotação foi encerrada.", true);
-    return;
-  }
-  const cot = cotSnap.data();
-  const itens = (cot.produtos || []).map((p,i) => ({
-    produtoId: p.produtoId, nome: p.nome, unidade: p.unidade || "UN",
-    marca: document.querySelector(`[name="marca-${i}"]`)?.value.trim() || "",
-    preco: Number(document.querySelector(`[name="preco-${i}"]`)?.value),
-    observacao: document.querySelector(`[name="obs-${i}"]`)?.value.trim() || ""
-  }));
-  if (itens.some(i => !Number.isFinite(i.preco) || i.preco <= 0)) {
-    mensagemNaTela("mensagem-resposta", "Informe um preço válido para todos os produtos.", true);
-    return;
-  }
-  const botao = document.getElementById("enviar-resposta");
-  botao.disabled = true; botao.textContent = "ENVIANDO...";
-  try {
-    const respostaId = cotacaoId + "__" + fornecedorId;
-    await setDoc(doc(db, "respostas", respostaId), {
-      cotacaoId, fornecedorId, responsavelUid: auth.currentUser?.uid || "",
-      itens, observacaoGeral: document.getElementById("resposta-observacao-geral").value.trim(),
-      enviadoEm: serverTimestamp()
-    });
-    await updateDoc(doc(db, "cotacao_fornecedores", respostaId), { status: "respondido" });
-    mensagemNaTela("mensagem-resposta", "Resposta enviada com sucesso!");
-    area.style.display = "none";
-    area.innerHTML = "";
-    await carregarCotacoesFornecedor(auth.currentUser.uid);
-  } catch (erro) {
-    console.error(erro);
-    mensagemNaTela("mensagem-resposta", "Não foi possível enviar a resposta.", true);
-    botao.disabled = false; botao.textContent = "ENVIAR RESPOSTA";
-  }
+  const area=document.getElementById("form-resposta-fornecedor"), cotacaoId=area.dataset.cotacaoId, fornecedorId=area.dataset.fornecedorId;
+  const cotSnap=await getDoc(doc(db,"cotacoes",cotacaoId));
+  if(!cotSnap.exists()||cotSnap.data().status!=="aberta"){mensagemNaTela("mensagem-resposta","Esta cotação foi encerrada.",true);return;}
+  const cot=cotSnap.data();
+  document.querySelectorAll("[data-resposta-item]").forEach(bloco=>{const n=Number(bloco.dataset.respostaItem);area._rascunho=area._rascunho||new Map();area._rascunho.set(n,{indisponivel:!!bloco.querySelector(".item-indisponivel")?.checked,preco:bloco.querySelector(`[name="preco-${n}"]`)?.value||"",observacao:bloco.querySelector(`[name="obs-${n}"]`)?.value||""});});
+  const itens=(cot.produtos||[]).map((p,i)=>{const d=area._rascunho?.get(i)||{};const indisponivel=!!d.indisponivel;const preco=d.preco===""?null:Number(d.preco);return {produtoId:p.produtoId,nome:p.nome,descricao:p.descricao||"",codigoBarras:p.codigoBarras||"",unidade:p.unidade||"UN",quantidade:Number(p.quantidade||1),indisponivel,preco,observacao:String(d.observacao||"").trim()};});
+  if(itens.some(i=>!i.indisponivel&&(!Number.isFinite(i.preco)||i.preco<=0))){mensagemNaTela("mensagem-resposta","Informe o preço ou marque o produto como indisponível em todos os itens.",true);return;}
+  const botao=document.getElementById("enviar-resposta");botao.disabled=true;botao.textContent="ENVIANDO...";
+  try{const respostaId=cotacaoId+"__"+fornecedorId;await setDoc(doc(db,"respostas",respostaId),{cotacaoId,fornecedorId,responsavelUid:auth.currentUser?.uid||"",itens,observacaoGeral:document.getElementById("resposta-observacao-geral").value.trim(),enviadoEm:serverTimestamp()});await updateDoc(doc(db,"cotacao_fornecedores",respostaId),{status:"respondido"});mensagemNaTela("mensagem-resposta","Resposta enviada com sucesso!");area.style.display="none";area.innerHTML="";await carregarCotacoesFornecedor(auth.currentUser.uid);}
+  catch(erro){console.error(erro);mensagemNaTela("mensagem-resposta","Não foi possível enviar a resposta. Verifique as regras do Firebase.",true);botao.disabled=false;botao.textContent="ENVIAR RESPOSTA";}
 }
 
 // MENSAGEM DOS PRODUTOS
@@ -1944,12 +1890,8 @@ function renderizarProdutos() {
             EDITAR
           </button>
 
-          <button
-            type="button"
-            data-alterar-status="${escaparHTML(produto.id)}"
-          >
-            ${ativo ? "DESATIVAR" : "ATIVAR"}
-          </button>
+          <button type="button" data-alterar-status="${escaparHTML(produto.id)}">${ativo ? "DESATIVAR" : "ATIVAR"}</button>
+          <button type="button" data-excluir-produto="${escaparHTML(produto.id)}">EXCLUIR</button>
 
         </details>
 
@@ -1962,6 +1904,8 @@ function renderizarProdutos() {
       editarProduto(botao.dataset.editar);
     });
   });
+
+  lista.querySelectorAll("[data-excluir-produto]").forEach(botao=>botao.addEventListener("click",async()=>{const id=botao.dataset.excluirProduto;const pr=produtosCarregados.find(x=>x.id===id);if(!confirm(`Excluir permanentemente o produto "${pr?.nome||""}"?`))return;try{const ps=await getDoc(doc(db,"produtos",id));const codigo=String(ps.data()?.codigoBarras||"").replace(/\D/g,"");if(codigo){const ix=await getDoc(doc(db,"codigos_barras",codigo));if(ix.exists()&&ix.data().produtoId===id)await deleteDoc(doc(db,"codigos_barras",codigo));}await deleteDoc(doc(db,"produtos",id));await carregarProdutos();}catch(e){console.error(e);alert("Não foi possível excluir o produto. Confira as regras do Firestore.");}}));
 
   lista.querySelectorAll("[data-alterar-status]").forEach(botao => {
     botao.addEventListener("click", () => {
@@ -2181,27 +2125,35 @@ async function salvarProduto(evento) {
   evento.preventDefault();
 
   const botao = document.getElementById("botao-salvar-produto");
+
   const idEmEdicao = produtoEditandoId;
-  const codigoDigitado = document.getElementById("produto-codigo").value.trim();
-  const codigoBarras = codigoDigitado.replace(/\D/g, "");
 
   const dados = {
     nome: document.getElementById("produto-nome").value.trim(),
-    codigoBarras,
+
+    codigoBarras: document.getElementById("produto-codigo").value.replace(/\s+/g, "").trim(),
+
     departamento: document.getElementById("produto-departamento").value.trim(),
+
     categoria: document.getElementById("produto-categoria").value.trim(),
+
     unidade: document.getElementById("produto-unidade").value,
+
     ativo: document.getElementById("produto-ativo").checked,
+
     foto: fotoProdutoAtual || ""
   };
 
-  if (!dados.nome || !dados.departamento || !dados.categoria || !dados.unidade) {
-    mostrarMensagemProduto("Preencha todos os campos obrigatórios.", true);
-    return;
-  }
-
-  if (codigoDigitado && !codigoBarras) {
-    mostrarMensagemProduto("Digite um código de barras válido, usando números.", true);
+  if (
+    !dados.nome ||
+    !dados.departamento ||
+    !dados.categoria ||
+    !dados.unidade
+  ) {
+    mostrarMensagemProduto(
+      "Preencha todos os campos obrigatórios.",
+      true
+    );
     return;
   }
 
@@ -2209,18 +2161,22 @@ async function salvarProduto(evento) {
   botao.textContent = "SALVANDO...";
 
   try {
-    // Verificação complementar dos produtos antigos, antes de ativar o índice único.
-    if (codigoBarras) {
+    // Impede cadastrar o mesmo código de barras em produtos diferentes.
+    // Na edição, permite manter o código do próprio produto.
+    if (dados.codigoBarras) {
       const consultaCodigo = query(
         collection(db, "produtos"),
-        where("codigoBarras", "==", codigoBarras)
+        where("codigoBarras", "==", dados.codigoBarras)
       );
+
       const resultadoCodigo = await getDocs(consultaCodigo);
-      const duplicado = resultadoCodigo.docs.find(documento => documento.id !== idEmEdicao);
+      const duplicado = resultadoCodigo.docs.find(
+        documento => documento.id !== idEmEdicao
+      );
 
       if (duplicado) {
         mostrarMensagemProduto(
-          `Este código de barras já está cadastrado no produto "${duplicado.data().nome || "Produto sem nome"}".`,
+          `Este código de barras já está cadastrado no produto "${duplicado.data().nome || "Produto sem nome"}". Confira o código antes de continuar.`,
           true
         );
         document.getElementById("produto-codigo").focus();
@@ -2228,74 +2184,48 @@ async function salvarProduto(evento) {
       }
     }
 
-    const produtoRef = idEmEdicao
-      ? doc(db, "produtos", idEmEdicao)
-      : doc(collection(db, "produtos"));
-    const codigoNovoRef = codigoBarras
-      ? doc(db, "codigos_barras", codigoBarras)
-      : null;
+    if (idEmEdicao) {
+      await updateDoc(doc(db, "produtos", idEmEdicao), dados);
 
-    await runTransaction(db, async transacao => {
-      const codigoAnterior = idEmEdicao
-        ? (todosProdutos.find(p => p.id === idEmEdicao)?.codigoBarras || "").replace(/\D/g, "")
-        : "";
-      const codigoAntigoRef = codigoAnterior
-        ? doc(db, "codigos_barras", codigoAnterior)
-        : null;
-
-      // Todas as leituras acontecem antes das gravações da transação.
-      const codigoNovoSnap = codigoNovoRef ? await transacao.get(codigoNovoRef) : null;
-      const codigoAntigoSnap = codigoAntigoRef && codigoAnterior !== codigoBarras
-        ? await transacao.get(codigoAntigoRef)
-        : null;
-
-      if (codigoNovoSnap?.exists() && codigoNovoSnap.data().produtoId !== produtoRef.id) {
-        throw new Error("CODIGO_BARRAS_DUPLICADO");
-      }
-
-      transacao.set(produtoRef, {
+    } else {
+      await addDoc(collection(db, "produtos"), {
         ...dados,
-        ...(idEmEdicao ? {} : { criadoEm: serverTimestamp() })
-      }, { merge: Boolean(idEmEdicao) });
-
-      if (codigoNovoRef) {
-        transacao.set(codigoNovoRef, {
-          produtoId: produtoRef.id,
-          codigoBarras,
-          atualizadoEm: serverTimestamp()
-        });
-      }
-
-      if (codigoAntigoSnap?.exists() && codigoAntigoSnap.data().produtoId === produtoRef.id) {
-        transacao.delete(codigoAntigoRef);
-      }
-    });
+        criadoEm: serverTimestamp()
+      });
+    }
 
     limparFormularioProduto();
+
     paginaAtual = 0;
+
     await carregarProdutos();
 
     const mensagemLista = document.getElementById("mensagem-lista");
+
     if (mensagemLista) {
       mensagemLista.textContent = idEmEdicao
         ? "Produto atualizado com sucesso!"
         : "Produto cadastrado com sucesso!";
+
       mensagemLista.style.color = "#267326";
     }
+
   } catch (erro) {
     console.error("Erro ao salvar produto:", erro);
+
     mostrarMensagemProduto(
-      erro.message === "CODIGO_BARRAS_DUPLICADO"
-        ? "Este código de barras já pertence a outro produto."
-        : "Não foi possível salvar o produto. Tente novamente.",
+      "Não foi possível salvar o produto. Tente novamente.",
       true
     );
+
   } finally {
     botao.disabled = false;
-    botao.textContent = produtoEditandoId ? "ATUALIZAR PRODUTO" : "SALVAR PRODUTO";
+
+    botao.textContent = produtoEditandoId
+      ? "ATUALIZAR PRODUTO"
+      : "SALVAR PRODUTO";
   }
 }
-
 // ATIVAR OU DESATIVAR PRODUTO
 
 async function alterarStatusProduto(id) {
