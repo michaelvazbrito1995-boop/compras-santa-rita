@@ -25,6 +25,35 @@ import {
   runTransaction
 } from "https://www.gstatic.com/firebasejs/13.3.0/firebase-firestore.js";
 
+
+// LEITOR DE CÓDIGO DE BARRAS PELA CÂMERA (compatível com navegadores que oferecem BarcodeDetector)
+async function abrirLeitorCodigoBarras(inputId) {
+  const campo=document.getElementById(inputId);
+  if(!campo)return;
+  if(!navigator.mediaDevices?.getUserMedia){alert("Seu navegador não permite acessar a câmera. Digite o código manualmente.");return;}
+  if(!("BarcodeDetector" in window)){alert("A leitura pela câmera não é compatível com este navegador. Tente abrir o aplicativo no Chrome atualizado ou digite o código manualmente.");return;}
+  let stream=null, ativo=true, raf=0;
+  const modal=document.createElement("div");
+  modal.style.cssText="position:fixed;inset:0;z-index:99999;background:#000e;display:flex;align-items:center;justify-content:center;padding:18px";
+  modal.innerHTML='<div style="background:white;border-radius:14px;padding:16px;width:min(100%,480px);text-align:center"><h3 style="margin:0 0 10px">Ler código de barras</h3><video autoplay playsinline muted style="width:100%;max-height:60vh;object-fit:cover;background:#111;border-radius:10px"></video><p style="font-size:13px">Aponte a câmera para o código de barras.</p><button type="button" data-fechar-leitor>FECHAR</button></div>';
+  document.body.appendChild(modal);
+  const video=modal.querySelector("video");
+  const fechar=()=>{ativo=false;cancelAnimationFrame(raf);if(stream)stream.getTracks().forEach(t=>t.stop());modal.remove();};
+  modal.querySelector("[data-fechar-leitor]").onclick=fechar;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+    if(!ativo){stream.getTracks().forEach(t=>t.stop());return;}
+    video.srcObject=stream;await video.play();
+    const formatos=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","codabar","qr_code"];
+    let detector;
+    try{detector=new window.BarcodeDetector({formats:await window.BarcodeDetector.getSupportedFormats().then(fs=>fs.filter(f=>formatos.includes(f)))});}catch{detector=new window.BarcodeDetector();}
+    const ler=async()=>{if(!ativo)return;try{if(video.readyState>=2){const codigos=await detector.detect(video);if(codigos.length&&codigos[0].rawValue){campo.value=codigos[0].rawValue;campo.dispatchEvent(new Event("input",{bubbles:true}));campo.dispatchEvent(new Event("change",{bubbles:true}));fechar();return;}}}catch(e){console.warn("Falha ao ler código:",e);}if(ativo)raf=requestAnimationFrame(ler);};
+    ler();
+  }catch(e){fechar();console.error(e);alert("Não foi possível abrir a câmera. Verifique a permissão de câmera e se o site está em HTTPS.");}
+}
+function botaoLeitor(id){return `<button type="button" class="botao-leitor-codigo" data-leitor-codigo="${id}" aria-label="Ler código de barras com a câmera">📷 Ler código</button>`;}
+function ativarLeitoresCodigo(raiz=document){raiz.querySelectorAll("[data-leitor-codigo]").forEach(b=>{if(b.dataset.leitorAtivo)return;b.dataset.leitorAtivo="1";b.addEventListener("click",()=>abrirLeitorCodigoBarras(b.dataset.leitorCodigo));});}
+
 // FIREBASE
 
 const firebaseConfig = {
@@ -741,6 +770,7 @@ async function abrirModulo(tela) {
               type="text"
               placeholder="Código de barras"
             >
+            ${botaoLeitor("produto-codigo")}
 
             <label for="produto-departamento">Departamento</label>
 
@@ -868,6 +898,8 @@ async function abrirModulo(tela) {
 
       </div>
     `;
+
+    ativarLeitoresCodigo(conteudo);
 
     document.getElementById("abrir-formulario-produto")
       .addEventListener("click", () => {
@@ -1177,7 +1209,7 @@ async function abrirModuloCotacoes(conteudo) {
               <label for="produto-rapido-unidade-online">Unidade</label>
               <select id="produto-rapido-unidade-online"><option value="UN">UN</option><option value="KG">KG</option><option value="CX">CX</option><option value="FD">FD</option><option value="PCT">PCT</option><option value="LT">LT</option><option value="ML">ML</option><option value="GR">GR</option><option value="SC">SC</option><option value="DZ">DZ</option></select>
               <label for="produto-rapido-codigo-online">Código de barras (opcional)</label>
-              <input id="produto-rapido-codigo-online" inputmode="numeric" placeholder="Código de barras">
+              <input id="produto-rapido-codigo-online" inputmode="numeric" placeholder="Código de barras">${botaoLeitor("produto-rapido-codigo-online")}
               <button type="button" id="salvar-produto-rapido-online">SALVAR E ADICIONAR</button>
               <p id="mensagem-produto-rapido-online" role="status"></p>
             </div>
@@ -1255,7 +1287,7 @@ async function abrirFormularioPresencial() {
         <div id="produto-rapido-pres" class="produto-rapido-form" hidden>
           <label for="produto-rapido-nome-pres">Nome do produto</label><input id="produto-rapido-nome-pres" maxlength="100" placeholder="Ex.: Açúcar cristal 5kg">
           <label for="produto-rapido-unidade-pres">Unidade</label><select id="produto-rapido-unidade-pres"><option value="UN">UN</option><option value="KG">KG</option><option value="CX">CX</option><option value="FD">FD</option><option value="PCT">PCT</option><option value="LT">LT</option><option value="ML">ML</option><option value="GR">GR</option><option value="SC">SC</option><option value="DZ">DZ</option></select>
-          <label for="produto-rapido-codigo-pres">Código de barras (opcional)</label><input id="produto-rapido-codigo-pres" inputmode="numeric" placeholder="Código de barras">
+          <label for="produto-rapido-codigo-pres">Código de barras (opcional)</label><input id="produto-rapido-codigo-pres" inputmode="numeric" placeholder="Código de barras">${botaoLeitor("produto-rapido-codigo-pres")}
           <button type="button" id="salvar-produto-rapido-pres">SALVAR E ADICIONAR</button><p id="mensagem-produto-rapido-pres" role="status"></p>
         </div>
       </div>
@@ -1264,6 +1296,7 @@ async function abrirFormularioPresencial() {
       <div id="pres-mensagem" role="status"></div>
       <button type="submit" id="pres-salvar">FINALIZAR E SALVAR NO HISTÓRICO</button>
       <button type="button" id="pres-cancelar">CANCELAR</button></form>`;
+    ativarLeitoresCodigo(area);
     const selecionados=new Map();
     document.getElementById("abrir-produto-rapido-pres").onclick=()=>{const f=document.getElementById("produto-rapido-pres");f.hidden=!f.hidden;};
     document.getElementById("salvar-produto-rapido-pres").onclick=async()=>{
@@ -1274,16 +1307,16 @@ async function abrirFormularioPresencial() {
       finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
     };
     const renderBusca=()=>{const q=normalizarTexto(document.getElementById("pres-busca").value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";document.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
-    const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.empresa||f.nome||f.titular||"Empresa")}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
+    const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small><br><textarea class="pres-observacao" rows="2" maxlength="500" placeholder="Observação: bonificação, prazo, condição..."></textarea></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.empresa||f.nome||f.titular||"Empresa")}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
     document.getElementById("pres-busca").addEventListener("input",renderBusca);
     document.getElementById("pres-cancelar").onclick=()=>{area.style.display="none";area.innerHTML="";};
     renderBusca();renderTabela();
     document.getElementById("form-presencial").addEventListener("submit",async ev=>{ev.preventDefault();const btn=document.getElementById("pres-salvar");const msg=document.getElementById("pres-mensagem");const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;
       if(!titulo||!data||!selecionados.size){msg.textContent="Informe título, data e pelo menos um produto.";return;}
       const itens=[];let erro="";
-      for(const p of selecionados.values()){const row=document.querySelector(`[data-pres-row="${CSS.escape(p.id)}"]`);const quantidade=Number(row.querySelector(".pres-qtd").value);const vencedorId=row.querySelector(".pres-vencedor").value;const precos=fornecedores.map(f=>{const campo=row.querySelector(`[data-forn="${CSS.escape(f.id)}"]`);return {fornecedorId:f.id,preco:campo.value===""?null:Number(campo.value)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0)){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}itens.push({produtoId:p.id,nome:p.nome,unidade:p.unidade||"UN",quantidade,precos,vencedorId,precoVencedor:vencedor.preco,total:quantidade*vencedor.preco});}
+      for(const p of selecionados.values()){const row=document.querySelector(`[data-pres-row="${CSS.escape(p.id)}"]`);const quantidade=Number(row.querySelector(".pres-qtd").value);const vencedorId=row.querySelector(".pres-vencedor").value;const precos=fornecedores.map(f=>{const campo=row.querySelector(`[data-forn="${CSS.escape(f.id)}"]`);return {fornecedorId:f.id,preco:campo.value===""?null:Number(campo.value)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0)){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}itens.push({produtoId:p.id,nome:p.nome,unidade:p.unidade||"UN",quantidade,observacao:row.querySelector(".pres-observacao")?.value.trim()||"",precos,vencedorId,precoVencedor:vencedor.preco,total:quantidade*vencedor.preco});}
       if(erro){msg.textContent=erro;return;}const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?i.total:0),0);const valorTotal=itens.reduce((s,i)=>s+i.total,0);
-      btn.disabled=true;btn.textContent="SALVANDO...";try{await addDoc(collection(db,"cotacoes_presenciais"),{titulo,data,reuniaoTipo:"presencial",status:"finalizada",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",criadoEm:serverTimestamp()});msg.textContent="Cotação presencial salva no histórico!";await carregarListaCotacoesAdmin();area.style.display="none";area.innerHTML="";}catch(e){console.error(e);msg.textContent="Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent="FINALIZAR E SALVAR NO HISTÓRICO";}
+      btn.disabled=true;btn.textContent="SALVANDO...";try{await addDoc(collection(db,"cotacoes_presenciais"),{titulo,data,reuniaoTipo:"presencial",status:"finalizada",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),responsaveisUids:[...new Set(fornecedores.map(f=>f.responsavelUid).filter(Boolean))],itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",criadoEm:serverTimestamp()});msg.textContent="Cotação presencial salva no histórico!";await carregarListaCotacoesAdmin();area.style.display="none";area.innerHTML="";}catch(e){console.error(e);msg.textContent="Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent="FINALIZAR E SALVAR NO HISTÓRICO";}
     });
   }catch(e){console.error(e);area.innerHTML='<p>Não foi possível carregar os dados. Verifique o Firebase.</p><button type="button" id="pres-fechar">Fechar</button>';document.getElementById("pres-fechar").onclick=()=>area.style.display="none";}
 }
@@ -1332,6 +1365,7 @@ async function carregarOpcoesCotacao() {
       titular: usuariosPorUid.get(f.responsavelUid)?.nome || "Titular não identificado"
     })).sort((a, b) => String(a.titular).localeCompare(String(b.titular), "pt-BR"));
 
+    ativarLeitoresCodigo(area);
     renderizarResultadosProdutosCotacao("");
     renderizarProdutosSelecionadosCotacao();
 
@@ -1558,7 +1592,7 @@ async function baixarImagemCotacao(tipo,id){
     if(!snap.exists()) throw new Error("Cotação não encontrada");
     const c=snap.data(), itens=tipo==="online"?(c.produtos||[]):(c.itens||[]);
     const presencial=tipo==="presencial";
-    const linhaH=52, altura=Math.min(14000,300+itens.length*linhaH);
+    const linhaH=presencial?78:52, resumoAltura=presencial?Math.max(110,(c.fornecedores||[]).length*34+90):0, altura=Math.min(16000,330+itens.length*linhaH+resumoAltura);
     const canvas=document.createElement("canvas");
     canvas.width=presencial?1600:1400; canvas.height=altura;
     const ctx=canvas.getContext("2d");
@@ -1568,21 +1602,22 @@ async function baixarImagemCotacao(tipo,id){
     ctx.font="18px Arial";ctx.fillText(`Tipo: ${presencial?"Presencial":"Online"}   Data: ${c.data||"—"}   Gerado: ${new Date().toLocaleString("pt-BR")}`,55,145);
     ctx.fillStyle="#f2c928";ctx.fillRect(50,175,canvas.width-100,42);
     ctx.fillStyle="#222";ctx.font="bold 17px Arial";
-    const cols=presencial?[55,340,570,900,1000,1100,1320]:[55,570,930,1110];
-    const heads=presencial?["Produto","Código de barras","Empresa vencedora","Unidade","Qtd.","Preço vencedor","Total"]:["Produto","Código de barras","Unidade","Quantidade"];
+    const cols=presencial?[55,290,485,735,825,915,1080,1270]:[55,570,930,1110];
+    const heads=presencial?["Produto","Código de barras","Empresa vencedora","Unidade","Qtd.","Preço vencedor","Total","Observação"]:["Produto","Código de barras","Unidade","Quantidade"];
     heads.forEach((h,i)=>ctx.fillText(h,cols[i],203));
     ctx.font="16px Arial";
     itens.forEach((it,i)=>{
-      const y=245+i*linhaH;if(y>altura-15)return;
+      const y=245+i*linhaH;if(y>altura-resumoAltura-15)return;
       ctx.strokeStyle="#ddd";ctx.beginPath();ctx.moveTo(50,y-23);ctx.lineTo(canvas.width-50,y-23);ctx.stroke();
       const empresaVencedora=presencial?(c.fornecedores||[]).find(f=>f.fornecedorId===it.vencedorId):null;
       const vals=presencial
-        ?[it.nome,it.codigoBarras||"—",empresaVencedora?.empresa||empresaVencedora?.nome||"—",it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})]
+        ?[it.nome,it.codigoBarras||"—",empresaVencedora?.empresa||empresaVencedora?.nome||"—",it.unidade||"UN",String(it.quantidade||1),Number(it.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),Number(it.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}),it.observacao||"—"]
         :[it.nome,it.codigoBarras||"—",it.unidade||"UN",String(it.quantidade||1)];
-      vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===2?28:presencial&&j===1?20:42),cols[j],y));
+      vals.forEach((v,j)=>ctx.fillText(String(v||"").slice(0,presencial&&j===2?22:presencial&&j===1?18:presencial&&j===7?30:presencial?18:42),cols[j],y));
+      if(presencial&&it.observacao){ctx.font="12px Arial";ctx.fillStyle="#555";ctx.fillText(`Obs.: ${String(it.observacao).slice(0,95)}`,55,y+20);ctx.font="16px Arial";ctx.fillStyle="#222";}
     });
     if(presencial){
-      const y=altura-55;ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,y);
+      let y=altura-resumoAltura+28;ctx.font="bold 19px Arial";ctx.fillText("RESUMO POR EMPRESA",55,y);y+=34;ctx.font="15px Arial";(c.fornecedores||[]).forEach(f=>{const vencidos=itens.filter(i=>i.vencedorId===f.fornecedorId);const total=Number(c.totais?.[f.fornecedorId]??vencidos.reduce((s,i)=>s+Number(i.total||0),0));ctx.fillText(`${f.empresa||f.titular||"Empresa"} — ${vencidos.length} produto(s) — ${total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`.slice(0,100),55,y);y+=30;});ctx.font="bold 20px Arial";ctx.fillText(`TOTAL GERAL: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}`,55,altura-25);
     }
     const a=document.createElement("a");a.download=`cotacao-${tipo}-${id}.png`;a.href=canvas.toDataURL("image/png");a.click();
   } catch(e){console.error(e);alert(e.message||"Não foi possível gerar a imagem.");}
@@ -1601,11 +1636,11 @@ async function exportarCotacao(tipo,id){
     } else {
       linhas=(c.itens||[]).map(p=>{
         const vencedora=(c.fornecedores||[]).find(f=>f.fornecedorId===p.vencedorId);
-        return `<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td><strong>${escaparHTML(vencedora?.empresa||vencedora?.nome||"—")}</strong></td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;
+        return `<tr><td>${escaparHTML(p.nome)}</td><td>${escaparHTML(p.codigoBarras||"—")}</td><td><strong>${escaparHTML(vencedora?.empresa||vencedora?.nome||"—")}</strong></td><td>${escaparHTML(p.unidade||"UN")}</td><td>${p.quantidade}</td><td>${Number(p.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(p.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${escaparHTML(p.observacao||"—")}</td></tr>`;
       }).join("");
     }
     const headers=presencial
-      ?"<th>Produto</th><th>Código de barras</th><th>Empresa vencedora</th><th>Un.</th><th>Qtd.</th><th>Preço vencedor</th><th>Total</th>"
+      ?"<th>Produto</th><th>Código de barras</th><th>Empresa vencedora</th><th>Un.</th><th>Qtd.</th><th>Preço vencedor</th><th>Total</th><th>Observações</th>"
       :"<th>Produto</th><th>Código de barras</th><th>Un.</th><th>Quantidade</th>";
     const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>${escaparHTML(c.titulo||"Cotação")}</title><style>
       body{font:14px Arial;padding:28px;color:#222}h1{color:#333}small{color:#555}
@@ -1618,7 +1653,7 @@ async function exportarCotacao(tipo,id){
       <div class="meta">Tipo: ${presencial?"Presencial":"Online"}<br>Data: ${escaparHTML(c.data||dataHora)}<br>Gerado em: ${dataHora}<br>Status: ${escaparHTML(c.status||"Finalizada")}</div>
       ${c.descricao?`<p><b>Observações:</b> ${escaparHTML(c.descricao)}</p>`:""}
       <table><thead><tr>${headers}</tr></thead><tbody>${linhas}</tbody></table>
-      ${presencial?`<div class="total">Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</div>`:""}
+      ${presencial?`<h3>Resumo por empresa</h3><table><thead><tr><th>Empresa</th><th>Produtos vencidos</th><th>Total vendido</th></tr></thead><tbody>${(c.fornecedores||[]).map(f=>{const vencidos=(c.itens||[]).filter(i=>i.vencedorId===f.fornecedorId);const total=Number(c.totais?.[f.fornecedorId]??vencidos.reduce((s,i)=>s+Number(i.total||0),0));return `<tr><td>${escaparHTML(f.empresa||f.titular||"Empresa")}</td><td>${vencidos.length}</td><td>${total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;}).join("")}</tbody></table><div class="total">Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</div>`:""}
       <p style="margin-top:30px;font-size:11px">Documento gerado pelo sistema Compras Santa Rita.</p>
       <button onclick="window.print()">Salvar como PDF / Imprimir</button></html>`;
     const w=window.open("","_blank");
@@ -1757,7 +1792,6 @@ async function carregarCotacoesFornecedor(uid) {
   try{
     const vinculosSnap=await getDocs(query(collection(db,"cotacao_fornecedores"),where("responsavelUid","==",uid)));
     const vinculos=vinculosSnap.docs.map(d=>({id:d.id,...d.data()}));
-    if(!vinculos.length){area.innerHTML='<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação por enquanto</strong><span>Quando uma cotação for enviada às suas empresas, ela aparecerá aqui.</span></div>';return;}
     const registros=await Promise.all(vinculos.map(async v=>{
       const [cotSnap,fornSnap,resSnap]=await Promise.all([getDoc(doc(db,"cotacoes",v.cotacaoId)),getDoc(doc(db,"fornecedores",v.fornecedorId)),getDoc(doc(db,"respostas",v.cotacaoId+"__"+v.fornecedorId))]);
       return {...v,cotacao:cotSnap.exists()?{id:cotSnap.id,...cotSnap.data()}:null,fornecedor:fornSnap.exists()?fornSnap.data():null,resposta:resSnap.exists()?resSnap.data():null};
@@ -1765,11 +1799,34 @@ async function carregarCotacoesFornecedor(uid) {
     const agrupados=new Map();registros.filter(r=>r.cotacao&&r.fornecedor?.ativo===true).forEach(r=>{if(!agrupados.has(r.cotacaoId))agrupados.set(r.cotacaoId,{cotacao:r.cotacao,empresas:[]});agrupados.get(r.cotacaoId).empresas.push(r);});
     const lista=[...agrupados.values()].sort((a,b)=>new Date(a.cotacao.prazo||0)-new Date(b.cotacao.prazo||0));
     const cards=lista.map(g=>{const c=g.cotacao;const enviada=g.empresas.some(r=>r.resposta||r.status==="respondido");const aberta=!enviada&&c.status==="aberta"&&(!c.prazo||new Date(c.prazo)>new Date());const finalizada=enviada||!aberta;const prazo=c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Sem prazo definido";return `<article class="cotacao-vendedor-card" data-status-vendedor="${finalizada?"finalizada":"aberta"}"><div class="cotacao-vendedor-topo"><span class="cotacao-vendedor-kicker">SOLICITAÇÃO DE PREÇOS</span><span class="cotacao-status ${aberta?"aberta":"encerrada"}">${enviada?"Resposta enviada":aberta?"Recebendo propostas":"Encerrada"}</span></div><h3>${escaparHTML(c.titulo||"Cotação sem título")}</h3><div class="cotacao-resumo-vendedor"><span><b>${(c.produtos||[]).length}</b> produtos</span><span>Prazo: ${escaparHTML(prazo)}</span></div><div class="cotacao-alerta-fixo cotacao-alerta-vendedor" role="note"><strong>ATENÇÃO!</strong><p>A quantidade e os valores dos produtos devem estar de acordo com a cotação. Caso haja divergências, a mercadoria será devolvida.</p></div>${c.descricao?`<div class="cotacao-descricao-vendedor"><b>Orientações do comprador</b><p>${escaparHTML(c.descricao)}</p></div>`:""}<div class="cotacao-empresas-titulo">Suas empresas disponíveis</div><div class="cotacao-empresas-vendedor">${g.empresas.map(r=>`<div class="cotacao-empresa-vendedor"><div class="cotacao-empresa-identidade"><span class="cotacao-empresa-icone">▦</span><div><strong>${escaparHTML(r.fornecedor.empresa||"Empresa sem nome")}</strong><small>${r.resposta?"Participou desta proposta":"Vinculada à cotação"}</small></div></div><span class="cotacao-empresa-status ${r.resposta?"respondida":"pendente"}">${r.resposta?"Respondida":"Disponível"}</span></div>`).join("")}</div>${aberta?`<button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-responder-cotacao="${escaparHTML(c.id)}">RESPONDER COTAÇÃO <span>›</span></button>`:enviada?`<button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-ver-resposta="${escaparHTML(c.id)}">VER MINHA RESPOSTA <span>›</span></button>`:`<p class="cotacao-aviso-encerrada">Esta cotação foi encerrada sem resposta.</p>`}</article>`;}).join("");
-    area.innerHTML=`<div class="abas-cotacoes abas-cotacoes-vendedor" role="tablist"><button type="button" class="aba-cotacoes ativa" data-aba-vendedor="aberta">EM ABERTO</button><button type="button" class="aba-cotacoes" data-aba-vendedor="finalizada">FINALIZADAS</button></div><div id="cotacoes-vendedor-abertas">${cards}</div><div id="cotacoes-vendedor-finalizadas" hidden></div>`;
+    let cardsPresenciais="";
+    try {
+      const presenciaisSnap=await getDocs(query(collection(db,"cotacoes_presenciais"),where("responsaveisUids","array-contains",uid)));
+      cardsPresenciais=presenciaisSnap.docs.map(d=>{const c=d.data();return `<article class="cotacao-vendedor-card" data-status-vendedor="finalizada"><div class="cotacao-vendedor-topo"><span class="cotacao-vendedor-kicker">RESULTADO DE COTAÇÃO PRESENCIAL</span><span class="cotacao-status encerrada">Finalizada</span></div><h3>${escaparHTML(c.titulo||"Cotação presencial")}</h3><div class="cotacao-resumo-vendedor"><span><b>${(c.itens||[]).length}</b> produtos</span><span>Data: ${escaparHTML(c.data||"—")}</span></div><p>Resultado da compra e vendas por empresa.</p><button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-ver-presencial-fornecedor="${escaparHTML(d.id)}">CONSULTAR RESULTADO <span>›</span></button></article>`;}).join("");
+    } catch(e) { console.error("Não foi possível carregar cotações presenciais para o vendedor:",e); }
+    area.innerHTML=`<div class="abas-cotacoes abas-cotacoes-vendedor" role="tablist"><button type="button" class="aba-cotacoes ativa" data-aba-vendedor="aberta">EM ABERTO</button><button type="button" class="aba-cotacoes" data-aba-vendedor="finalizada">FINALIZADAS</button></div><div id="cotacoes-vendedor-abertas">${cards}</div><div id="cotacoes-vendedor-finalizadas" hidden>${cardsPresenciais}</div>`;
     const renderAbas=()=>{const abertas=area.querySelectorAll('[data-status-vendedor="aberta"]');const finalizadas=area.querySelectorAll('[data-status-vendedor="finalizada"]');const destinoA=area.querySelector("#cotacoes-vendedor-abertas"),destinoF=area.querySelector("#cotacoes-vendedor-finalizadas");destinoA.innerHTML="";destinoF.innerHTML="";abertas.forEach(x=>destinoA.appendChild(x));finalizadas.forEach(x=>destinoF.appendChild(x));if(!destinoA.children.length)destinoA.innerHTML='<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação em aberto</strong><span>As novas solicitações aparecerão aqui.</span></div>';if(!destinoF.children.length)destinoF.innerHTML='<div class="cotacao-vazia-fornecedor"><strong>Nenhuma cotação finalizada</strong><span>Depois de enviar sua proposta, ela ficará disponível aqui para consulta.</span></div>';};
     renderAbas();area.querySelectorAll("[data-aba-vendedor]").forEach(b=>b.onclick=()=>{area.querySelectorAll("[data-aba-vendedor]").forEach(x=>x.classList.toggle("ativa",x===b));area.querySelector("#cotacoes-vendedor-abertas").hidden=b.dataset.abaVendedor!=="aberta";area.querySelector("#cotacoes-vendedor-finalizadas").hidden=b.dataset.abaVendedor!=="finalizada";});
-    area.querySelectorAll("[data-responder-cotacao]").forEach(b=>b.onclick=()=>abrirFormularioResposta(b.dataset.responderCotacao));area.querySelectorAll("[data-ver-resposta]").forEach(b=>b.onclick=()=>abrirFormularioResposta(b.dataset.verResposta));
+    area.querySelectorAll("[data-responder-cotacao]").forEach(b=>b.onclick=()=>abrirFormularioResposta(b.dataset.responderCotacao));area.querySelectorAll("[data-ver-resposta]").forEach(b=>b.onclick=()=>abrirFormularioResposta(b.dataset.verResposta));area.querySelectorAll("[data-ver-presencial-fornecedor]").forEach(b=>b.onclick=()=>abrirDetalhesPresencialFornecedor(b.dataset.verPresencialFornecedor,uid));
   }catch(erro){console.error("Erro ao carregar cotações do fornecedor:",erro);area.textContent="Não foi possível carregar as cotações.";}
+}
+
+async function abrirDetalhesPresencialFornecedor(id, uid) {
+  try {
+    const snap=await getDoc(doc(db,"cotacoes_presenciais",id));
+    if(!snap.exists())throw new Error("Cotação não encontrada.");
+    const c=snap.data();
+    const permitido=(c.responsaveisUids||[]).includes(uid)||(c.fornecedores||[]).some(f=>f.responsavelUid===uid);
+    if(!permitido)throw new Error("Você não tem autorização para visualizar esta cotação.");
+    const fornecedores=c.fornecedores||[],itens=c.itens||[];
+    const resumo=fornecedores.map(f=>{const vendidos=itens.filter(i=>i.vencedorId===f.fornecedorId);const total=Number(c.totais?.[f.fornecedorId]??vendidos.reduce((s,i)=>s+Number(i.total||0),0));return `<tr><td>${escaparHTML(f.empresa||f.titular||"Empresa")}</td><td>${vendidos.length}</td><td>${total.toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td></tr>`;}).join("");
+    const linhas=itens.map(i=>{const vencedor=fornecedores.find(f=>f.fornecedorId===i.vencedorId);return `<tr><td>${escaparHTML(i.nome||"Produto")}</td><td>${Number(i.quantidade||0).toLocaleString("pt-BR")} ${escaparHTML(i.unidade||"UN")}</td><td>${escaparHTML(vencedor?.empresa||vencedor?.titular||"—")}</td><td>${Number(i.precoVencedor||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${Number(i.total||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</td><td>${escaparHTML(i.observacao||"—")}</td></tr>`;}).join("");
+    const modal=document.createElement("div");
+    modal.style.cssText="position:fixed;inset:0;z-index:99998;background:#0009;display:flex;align-items:center;justify-content:center;padding:14px";
+    modal.innerHTML=`<section role="dialog" aria-modal="true" aria-label="Resultado da cotação presencial" style="background:var(--card,#fff);color:var(--text,#222);width:min(100%,1000px);max-height:92vh;overflow:auto;border-radius:14px;padding:18px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 style="margin:0">${escaparHTML(c.titulo||"Cotação presencial")}</h2><p style="margin:5px 0 12px">Data: ${escaparHTML(c.data||"—")} · Somente visualização</p></div><button type="button" data-fechar-resultado aria-label="Fechar">FECHAR</button></div><h3>Produtos comprados</h3><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:720px"><thead><tr><th>Produto</th><th>Quantidade</th><th>Empresa vencedora</th><th>Preço unitário</th><th>Total</th><th>Observações</th></tr></thead><tbody>${linhas||'<tr><td colspan="6">Nenhum produto registrado.</td></tr>'}</tbody></table></div><h3>Resumo por empresa</h3><div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:420px"><thead><tr><th>Empresa</th><th>Produtos vencidos</th><th>Total vendido</th></tr></thead><tbody>${resumo}</tbody></table></div><h3>Total geral: ${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</h3></section>`;
+    document.body.appendChild(modal);
+    const fechar=()=>modal.remove();modal.querySelector("[data-fechar-resultado]").onclick=fechar;modal.addEventListener("click",e=>{if(e.target===modal)fechar();});
+  } catch(e) { console.error(e); alert(e.message||"Não foi possível abrir o resultado da cotação."); }
 }
 
 async function abrirFormularioResposta(cotacaoId) {
