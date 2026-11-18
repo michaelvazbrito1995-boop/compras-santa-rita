@@ -1235,7 +1235,7 @@ async function abrirModuloCotacoes(conteudo) {
     </div>`;
 
   document.getElementById("voltar-painel").addEventListener("click", () => conteudo.innerHTML = "");
-  document.getElementById("nova-cotacao-presencial").addEventListener("click", abrirFormularioPresencial);
+  document.getElementById("nova-cotacao-presencial").addEventListener("click", () => abrirFormularioPresencial());
   document.getElementById("nova-cotacao").addEventListener("click", async () => {
     cotacaoRascunhoEditandoId = null;
     document.getElementById("salvar-cotacao").textContent = "ENVIAR AOS VENDEDORES";
