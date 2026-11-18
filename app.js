@@ -95,6 +95,7 @@ let fotoProdutoAtual = "";
 let produtosDisponiveisCotacao = [];
 let produtosSelecionadosCotacao = new Map();
 let cotacaoRascunhoEditandoId = null;
+let cotacaoPresencialEditandoId = null;
 
 // FUNÇÕES GERAIS
 
@@ -1200,7 +1201,7 @@ async function abrirModuloCotacoes(conteudo) {
           <h3 style="margin-top:18px">Produtos da cotação</h3>
           <p class="ajuda-cotacao">Pesquise pelo nome ou código de barras e adicione somente o que precisa.</p>
           <label for="buscar-produto-cotacao">Buscar produto</label>
-          <input id="buscar-produto-cotacao" type="search" autocomplete="off" placeholder="Digite o nome ou código de barras...">
+          <input id="buscar-produto-cotacao" type="search" autocomplete="off" placeholder="Digite o nome ou código de barras...">${botaoLeitor("buscar-produto-cotacao")}
           <div class="cadastro-rapido-cotacao">
             <button type="button" class="botao-secundario-cotacao" id="abrir-produto-rapido-online">+ CADASTRO RÁPIDO DE PRODUTO</button>
             <div id="produto-rapido-online" class="produto-rapido-form" hidden>
@@ -1266,22 +1267,29 @@ async function criarProdutoRapido(nome, unidade, codigoBarras = "") {
   return { id: ref.id, ...dados };
 }
 
-async function abrirFormularioPresencial() {
+async function abrirFormularioPresencial(idEdicao = null) {
   const area = document.getElementById("form-presencial-area");
   area.style.display = "block";
   area.innerHTML = '<p>Carregando produtos e fornecedores...</p>';
+  cotacaoPresencialEditandoId = idEdicao;
   try {
-    const [ps, fs] = await Promise.all([getDocs(collection(db,"produtos")), getDocs(collection(db,"fornecedores"))]);
+    const [ps, fs, cotSnap] = await Promise.all([
+      getDocs(collection(db,"produtos")),
+      getDocs(collection(db,"fornecedores")),
+      idEdicao ? getDoc(doc(db,"cotacoes_presenciais",idEdicao)) : Promise.resolve(null)
+    ]);
+    const dadosEdicao = cotSnap?.exists() ? cotSnap.data() : null;
+    if (idEdicao && (!dadosEdicao || dadosEdicao.status === "finalizada")) throw new Error("Este rascunho não está disponível para edição.");
     const produtos = ps.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.ativo===true).sort((a,b)=>String(a.nome).localeCompare(String(b.nome),"pt-BR"));
     const fornecedoresBase = fs.docs.map(d=>({id:d.id,...d.data()})).filter(f=>f.ativo===true);
     const uids=[...new Set(fornecedoresBase.map(f=>f.responsavelUid).filter(Boolean))];
     const titulares=new Map();
     await Promise.all(uids.map(async uid=>{try{const u=await getDoc(doc(db,"usuarios",uid));if(u.exists())titulares.set(uid,u.data().nome||"Titular não identificado");}catch(e){console.warn(e);}}));
     const fornecedores=fornecedoresBase.map(f=>({...f,titular:titulares.get(f.responsavelUid)||"Titular não identificado"})).sort((a,b)=>a.titular.localeCompare(b.titular,"pt-BR"));
-    area.innerHTML=`<form id="form-presencial"><h3>Nova cotação presencial</h3>
+    area.innerHTML=`<form id="form-presencial"><h3>${idEdicao?"Editar rascunho presencial":"Nova cotação presencial"}</h3>
       <label>Título da reunião</label><input id="pres-titulo" required placeholder="Ex.: Cotação semanal - bebidas">
-      <label>Data da reunião</label><input id="pres-data" type="date" required value="${new Date().toLocaleDateString('en-CA')}">
-      <label>Adicionar produto</label><input id="pres-busca" type="search" placeholder="Digite nome ou código de barras" autocomplete="off">
+      <label>Data da reunião</label><input id="pres-data" type="date" required>
+      <label>Adicionar produto</label><input id="pres-busca" type="search" placeholder="Digite nome ou código de barras" autocomplete="off">${botaoLeitor("pres-busca")}
       <div class="cadastro-rapido-cotacao">
         <button type="button" class="botao-secundario-cotacao" id="abrir-produto-rapido-pres">+ CADASTRO RÁPIDO DE PRODUTO</button>
         <div id="produto-rapido-pres" class="produto-rapido-form" hidden>
@@ -1294,10 +1302,13 @@ async function abrirFormularioPresencial() {
       <div id="pres-resultados" class="resultados-cotacao"></div>
       <div id="pres-selecionados"></div>
       <div id="pres-mensagem" role="status"></div>
+      <button type="button" id="pres-rascunho">SALVAR RASCUNHO</button>
       <button type="submit" id="pres-salvar">FINALIZAR E SALVAR NO HISTÓRICO</button>
       <button type="button" id="pres-cancelar">CANCELAR</button></form>`;
     ativarLeitoresCodigo(area);
     const selecionados=new Map();
+    document.getElementById("pres-titulo").value=dadosEdicao?.titulo||"";
+    document.getElementById("pres-data").value=dadosEdicao?.data||new Date().toLocaleDateString('en-CA');
     document.getElementById("abrir-produto-rapido-pres").onclick=()=>{const f=document.getElementById("produto-rapido-pres");f.hidden=!f.hidden;};
     document.getElementById("salvar-produto-rapido-pres").onclick=async()=>{
       const b=document.getElementById("salvar-produto-rapido-pres"), msg=document.getElementById("mensagem-produto-rapido-pres");
@@ -1306,19 +1317,17 @@ async function abrirFormularioPresencial() {
       catch(e){msg.textContent=e.message||"Não foi possível cadastrar o produto.";msg.style.color="#c62828";}
       finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
     };
-    const renderBusca=()=>{const q=normalizarTexto(document.getElementById("pres-busca").value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";document.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
+    const renderBusca=()=>{const campo=document.getElementById("pres-busca"), codigo=String(campo.value||"").trim();const exato=produtos.find(p=>String(p.codigoBarras||"").trim()===codigo&&codigo.length>=6);if(exato&&!selecionados.has(exato.id)){selecionados.set(exato.id,exato);campo.value="";renderTabela();}else if(/^\d{6,}$/.test(codigo)&&!exato){const painel=document.getElementById("produto-rapido-pres"),codigoRapido=document.getElementById("produto-rapido-codigo-pres");if(painel&&codigoRapido){painel.hidden=false;codigoRapido.value=codigo;}}const q=normalizarTexto(campo.value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";area.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
     const renderTabela=()=>{const box=document.getElementById("pres-selecionados");if(!selecionados.size){box.innerHTML="<p>Nenhum produto adicionado.</p>";return;}box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Produto</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${[...selecionados.values()].map(p=>`<tr data-pres-row="${escaparHTML(p.id)}"><td>${escaparHTML(p.nome)}<br><small>${escaparHTML(p.unidade||"UN")}</small><br><textarea class="pres-observacao" rows="2" maxlength="500" placeholder="Observação: bonificação, prazo, condição..."></textarea></td><td><input type="number" min="0.001" step="0.001" class="pres-qtd" value="1" style="min-width:75px"></td>${fornecedores.map(f=>`<td><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" placeholder="—" style="min-width:100px"></td>`).join("")}<td><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}">${escaparHTML(f.empresa||f.nome||f.titular||"Empresa")}</option>`).join("")}</select></td><td><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);renderTabela();renderBusca();});};
+    const restaurarLinhas=()=>{for(const item of (dadosEdicao?.itens||[])){const pr=produtos.find(p=>p.id===item.produtoId)||{id:item.produtoId,nome:item.nome,unidade:item.unidade||"UN"};selecionados.set(pr.id,pr);}renderTabela();for(const item of (dadosEdicao?.itens||[])){const row=area.querySelector(`[data-pres-row="${CSS.escape(item.produtoId)}"]`);if(!row)continue;row.querySelector(".pres-qtd").value=item.quantidade??1;row.querySelector(".pres-observacao").value=item.observacao||"";row.querySelector(".pres-vencedor").value=item.vencedorId||"";for(const preco of item.precos||[]){const campo=row.querySelector(`[data-forn="${CSS.escape(preco.fornecedorId)}"]`);if(campo&&preco.preco!=null)campo.value=preco.preco;}}};
+    const montarDocumento=(finalizar)=>{const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;if(!titulo||!data)throw new Error("Informe o título e a data da reunião.");const itens=[];let erro="";for(const p of selecionados.values()){const row=area.querySelector(`[data-pres-row="${CSS.escape(p.id)}"]`);if(!row)continue;const quantidade=Number(row.querySelector(".pres-qtd").value);const vencedorId=row.querySelector(".pres-vencedor").value;const precos=fornecedores.map(f=>{const campo=row.querySelector(`[data-forn="${CSS.escape(f.id)}"]`);const valor=campo?.value??"";return{fornecedorId:f.id,preco:valor===""?null:Number(valor)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(finalizar&&(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0))){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}const item={produtoId:p.id,nome:p.nome,unidade:p.unidade||"UN",quantidade:quantidade>0?quantidade:null,observacao:row.querySelector(".pres-observacao")?.value.trim()||"",precos,vencedorId:vencedorId||"",precoVencedor:vencedor?.preco??null,total:vencedor?.preco>0?quantidade*vencedor.preco:null};itens.push(item);}if(erro)throw new Error(erro);if(finalizar&&!itens.length)throw new Error("Adicione pelo menos um produto para finalizar.");const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?Number(i.total||0):0),0);const valorTotal=itens.reduce((s,i)=>s+Number(i.total||0),0);return{titulo,data,reuniaoTipo:"presencial",status:finalizar?"finalizada":"rascunho",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),responsaveisUids:[...new Set(fornecedores.map(f=>f.responsavelUid).filter(Boolean))],itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",atualizadoEm:serverTimestamp(),...(finalizar?{finalizadoEm:serverTimestamp()}:{})};};
+    const salvar=async(finalizar)=>{const btn=document.getElementById(finalizar?"pres-salvar":"pres-rascunho"),msg=document.getElementById("pres-mensagem");try{const dados=montarDocumento(finalizar);btn.disabled=true;btn.textContent="SALVANDO...";if(cotacaoPresencialEditandoId){await updateDoc(doc(db,"cotacoes_presenciais",cotacaoPresencialEditandoId),dados);}else{const ref=await addDoc(collection(db,"cotacoes_presenciais"),{...dados,criadoEm:serverTimestamp()});cotacaoPresencialEditandoId=ref.id;}msg.textContent=finalizar?"Cotação presencial finalizada e salva no histórico!":"Rascunho salvo! Você poderá continuar editando depois.";await carregarListaCotacoesAdmin();if(finalizar){area.style.display="none";area.innerHTML="";cotacaoPresencialEditandoId=null;}else{btn.textContent="SALVAR RASCUNHO";btn.disabled=false;}}catch(e){console.error(e);msg.textContent=e.message||"Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent=finalizar?"FINALIZAR E SALVAR NO HISTÓRICO":"SALVAR RASCUNHO";}};
     document.getElementById("pres-busca").addEventListener("input",renderBusca);
-    document.getElementById("pres-cancelar").onclick=()=>{area.style.display="none";area.innerHTML="";};
-    renderBusca();renderTabela();
-    document.getElementById("form-presencial").addEventListener("submit",async ev=>{ev.preventDefault();const btn=document.getElementById("pres-salvar");const msg=document.getElementById("pres-mensagem");const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;
-      if(!titulo||!data||!selecionados.size){msg.textContent="Informe título, data e pelo menos um produto.";return;}
-      const itens=[];let erro="";
-      for(const p of selecionados.values()){const row=document.querySelector(`[data-pres-row="${CSS.escape(p.id)}"]`);const quantidade=Number(row.querySelector(".pres-qtd").value);const vencedorId=row.querySelector(".pres-vencedor").value;const precos=fornecedores.map(f=>{const campo=row.querySelector(`[data-forn="${CSS.escape(f.id)}"]`);return {fornecedorId:f.id,preco:campo.value===""?null:Number(campo.value)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0)){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}itens.push({produtoId:p.id,nome:p.nome,unidade:p.unidade||"UN",quantidade,observacao:row.querySelector(".pres-observacao")?.value.trim()||"",precos,vencedorId,precoVencedor:vencedor.preco,total:quantidade*vencedor.preco});}
-      if(erro){msg.textContent=erro;return;}const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?i.total:0),0);const valorTotal=itens.reduce((s,i)=>s+i.total,0);
-      btn.disabled=true;btn.textContent="SALVANDO...";try{await addDoc(collection(db,"cotacoes_presenciais"),{titulo,data,reuniaoTipo:"presencial",status:"finalizada",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),responsaveisUids:[...new Set(fornecedores.map(f=>f.responsavelUid).filter(Boolean))],itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",criadoEm:serverTimestamp()});msg.textContent="Cotação presencial salva no histórico!";await carregarListaCotacoesAdmin();area.style.display="none";area.innerHTML="";}catch(e){console.error(e);msg.textContent="Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent="FINALIZAR E SALVAR NO HISTÓRICO";}
-    });
-  }catch(e){console.error(e);area.innerHTML='<p>Não foi possível carregar os dados. Verifique o Firebase.</p><button type="button" id="pres-fechar">Fechar</button>';document.getElementById("pres-fechar").onclick=()=>area.style.display="none";}
+    document.getElementById("pres-rascunho").onclick=()=>salvar(false);
+    document.getElementById("pres-cancelar").onclick=()=>{area.style.display="none";area.innerHTML="";cotacaoPresencialEditandoId=null;};
+    renderBusca();restaurarLinhas();
+    document.getElementById("form-presencial").addEventListener("submit",ev=>{ev.preventDefault();salvar(true);});
+  }catch(e){console.error(e);area.innerHTML=`<p>${escaparHTML(e.message||"Não foi possível carregar os dados. Verifique o Firebase.")}</p><button type="button" id="pres-fechar">Fechar</button>`;document.getElementById("pres-fechar").onclick=()=>area.style.display="none";}
 }
 
 async function abrirDetalhesPresencial(id) {
@@ -1327,6 +1336,7 @@ async function abrirDetalhesPresencial(id) {
 }
 
 async function carregarOpcoesCotacao() {
+  const area = document.getElementById("form-cotacao-area");
   const areaProdutos = document.getElementById("cotacao-produtos");
   const areaResultados = document.getElementById("resultados-produtos-cotacao");
   const areaFornecedores = document.getElementById("cotacao-fornecedores");
@@ -1370,6 +1380,20 @@ async function carregarOpcoesCotacao() {
     renderizarProdutosSelecionadosCotacao();
 
     campoBusca.addEventListener("input", () => {
+      const codigo = String(campoBusca.value || "").trim();
+      const produtoExato = produtosDisponiveisCotacao.find(p => String(p.codigoBarras || "").trim() === codigo && codigo.length >= 6);
+      if (produtoExato && !produtosSelecionadosCotacao.has(produtoExato.id)) {
+        produtosSelecionadosCotacao.set(produtoExato.id, produtoExato);
+        renderizarProdutosSelecionadosCotacao();
+        campoBusca.value = "";
+        renderizarResultadosProdutosCotacao("");
+        return;
+      }
+      if (/^\d{6,}$/.test(codigo) && !produtoExato) {
+        const painel = document.getElementById("produto-rapido-online");
+        const codigoRapido = document.getElementById("produto-rapido-codigo-online");
+        if (painel && codigoRapido) { painel.hidden = false; codigoRapido.value = codigo; }
+      }
       renderizarResultadosProdutosCotacao(campoBusca.value);
     });
     document.getElementById("abrir-produto-rapido-online").addEventListener("click",()=>{const f=document.getElementById("produto-rapido-online");f.hidden=!f.hidden;});
@@ -1562,11 +1586,12 @@ async function carregarListaCotacoesAdmin() {
   const render=()=>{
    const data=document.getElementById("filtro-data-cotacoes")?.value||"";
    let lista=cotacoesAdminCache.filter(c=>!data||String(c.data||c.criadoEm?.toDate?.().toLocaleDateString("en-CA")||"").slice(0,10)===data);
-   lista=lista.filter(c=>{if(c.tipoLista==="presencial")return aba==="finalizadas";const dentroPrazo=!c.prazo||new Date(c.prazo)>new Date();const emAberto=c.status==="rascunho"||(c.status==="aberta"&&dentroPrazo);return aba==="abertas"?emAberto:!emAberto;});
+   lista=lista.filter(c=>{if(c.tipoLista==="presencial")return c.status==="rascunho"?aba==="abertas":aba==="finalizadas";const dentroPrazo=!c.prazo||new Date(c.prazo)>new Date();const emAberto=c.status==="rascunho"||(c.status==="aberta"&&dentroPrazo);return aba==="abertas"?emAberto:!emAberto;});
    const paginas=Math.max(1,Math.ceil(lista.length/4));paginaCotacoesAtual=Math.min(paginaCotacoesAtual,paginas);const vis=lista.slice((paginaCotacoesAtual-1)*4,paginaCotacoesAtual*4);
-   document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: Finalizada · Produtos: ${(c.itens||[]).length}</p><p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p><button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-presencial="${escaparHTML(c.id)}">BAIXAR IMAGEM</button><button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="rascunho"?"Rascunho":c.status==="aberta"?"Aberta":"Finalizada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}${c.status==="rascunho"?`<button type="button" data-editar-rascunho="${escaparHTML(c.id)}">EDITAR RASCUNHO</button><button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`:`<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-online="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`}</div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação nesta aba.</div>';
+   document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: ${c.status==="rascunho"?"Rascunho em edição":"Finalizada"} · Produtos: ${(c.itens||[]).length}</p>${c.status==="rascunho"?`<button type="button" data-editar-presencial="${escaparHTML(c.id)}">CONTINUAR RASCUNHO</button>`:`<p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p>`}${c.status==="rascunho"?"":`<button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-presencial="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>`}<button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="rascunho"?"Rascunho":c.status==="aberta"?"Aberta":"Finalizada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}${c.status==="rascunho"?`<button type="button" data-editar-rascunho="${escaparHTML(c.id)}">EDITAR RASCUNHO</button><button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`:`<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button><button type="button" data-imagem-online="${escaparHTML(c.id)}">BAIXAR IMAGEM</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`}</div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação nesta aba.</div>';
    document.getElementById("cotacoes-pagina-info").textContent=`Página ${paginaCotacoesAtual} de ${paginas} · ${lista.length} cotações`;
    document.getElementById("cotacoes-anterior").disabled=paginaCotacoesAtual===1;document.getElementById("cotacoes-proxima").disabled=paginaCotacoesAtual>=paginas;
+   area.querySelectorAll("[data-editar-presencial]").forEach(b=>b.onclick=()=>abrirFormularioPresencial(b.dataset.editarPresencial));
    area.querySelectorAll("[data-detalhes-presencial]").forEach(b=>b.onclick=()=>abrirDetalhesPresencial(b.dataset.detalhesPresencial));
    area.querySelectorAll("[data-editar-rascunho]").forEach(b=>b.onclick=()=>editarRascunhoCotacao(b.dataset.editarRascunho));
    area.querySelectorAll("[data-encerrar-cotacao]").forEach(b=>b.onclick=async()=>{if(confirm("Deseja encerrar esta cotação?")){await updateDoc(doc(db,"cotacoes",b.dataset.encerrarCotacao),{status:"encerrada"});await carregarListaCotacoesAdmin();}});
@@ -1801,7 +1826,7 @@ async function carregarCotacoesFornecedor(uid) {
     const cards=lista.map(g=>{const c=g.cotacao;const enviada=g.empresas.some(r=>r.resposta||r.status==="respondido");const aberta=!enviada&&c.status==="aberta"&&(!c.prazo||new Date(c.prazo)>new Date());const finalizada=enviada||!aberta;const prazo=c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Sem prazo definido";return `<article class="cotacao-vendedor-card" data-status-vendedor="${finalizada?"finalizada":"aberta"}"><div class="cotacao-vendedor-topo"><span class="cotacao-vendedor-kicker">SOLICITAÇÃO DE PREÇOS</span><span class="cotacao-status ${aberta?"aberta":"encerrada"}">${enviada?"Resposta enviada":aberta?"Recebendo propostas":"Encerrada"}</span></div><h3>${escaparHTML(c.titulo||"Cotação sem título")}</h3><div class="cotacao-resumo-vendedor"><span><b>${(c.produtos||[]).length}</b> produtos</span><span>Prazo: ${escaparHTML(prazo)}</span></div><div class="cotacao-alerta-fixo cotacao-alerta-vendedor" role="note"><strong>ATENÇÃO!</strong><p>A quantidade e os valores dos produtos devem estar de acordo com a cotação. Caso haja divergências, a mercadoria será devolvida.</p></div>${c.descricao?`<div class="cotacao-descricao-vendedor"><b>Orientações do comprador</b><p>${escaparHTML(c.descricao)}</p></div>`:""}<div class="cotacao-empresas-titulo">Suas empresas disponíveis</div><div class="cotacao-empresas-vendedor">${g.empresas.map(r=>`<div class="cotacao-empresa-vendedor"><div class="cotacao-empresa-identidade"><span class="cotacao-empresa-icone">▦</span><div><strong>${escaparHTML(r.fornecedor.empresa||"Empresa sem nome")}</strong><small>${r.resposta?"Participou desta proposta":"Vinculada à cotação"}</small></div></div><span class="cotacao-empresa-status ${r.resposta?"respondida":"pendente"}">${r.resposta?"Respondida":"Disponível"}</span></div>`).join("")}</div>${aberta?`<button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-responder-cotacao="${escaparHTML(c.id)}">RESPONDER COTAÇÃO <span>›</span></button>`:enviada?`<button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-ver-resposta="${escaparHTML(c.id)}">VER MINHA RESPOSTA <span>›</span></button>`:`<p class="cotacao-aviso-encerrada">Esta cotação foi encerrada sem resposta.</p>`}</article>`;}).join("");
     let cardsPresenciais="";
     try {
-      const presenciaisSnap=await getDocs(query(collection(db,"cotacoes_presenciais"),where("responsaveisUids","array-contains",uid)));
+      const presenciaisSnap=await getDocs(query(collection(db,"cotacoes_presenciais"),where("responsaveisUids","array-contains",uid),where("status","==","finalizada")));
       cardsPresenciais=presenciaisSnap.docs.map(d=>{const c=d.data();return `<article class="cotacao-vendedor-card" data-status-vendedor="finalizada"><div class="cotacao-vendedor-topo"><span class="cotacao-vendedor-kicker">RESULTADO DE COTAÇÃO PRESENCIAL</span><span class="cotacao-status encerrada">Finalizada</span></div><h3>${escaparHTML(c.titulo||"Cotação presencial")}</h3><div class="cotacao-resumo-vendedor"><span><b>${(c.itens||[]).length}</b> produtos</span><span>Data: ${escaparHTML(c.data||"—")}</span></div><p>Resultado da compra e vendas por empresa.</p><button type="button" class="botao-cotacao-empresa cotacao-proposta-mista-btn" data-ver-presencial-fornecedor="${escaparHTML(d.id)}">CONSULTAR RESULTADO <span>›</span></button></article>`;}).join("");
     } catch(e) { console.error("Não foi possível carregar cotações presenciais para o vendedor:",e); }
     area.innerHTML=`<div class="abas-cotacoes abas-cotacoes-vendedor" role="tablist"><button type="button" class="aba-cotacoes ativa" data-aba-vendedor="aberta">EM ABERTO</button><button type="button" class="aba-cotacoes" data-aba-vendedor="finalizada">FINALIZADAS</button></div><div id="cotacoes-vendedor-abertas">${cards}</div><div id="cotacoes-vendedor-finalizadas" hidden>${cardsPresenciais}</div>`;
