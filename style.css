@@ -1180,3 +1180,40 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
   #cotacao-produtos .produto-selecionado-cotacao button{grid-column:3;grid-row:1/3;align-self:center}
   .cotacao-acoes-download-vendedor{grid-template-columns:1fr}
 }
+
+
+/* Ajustes de usabilidade nas listas e paginações de cotação */
+.paginacao-cotacoes[hidden], .paginacao-resposta[hidden] { display:none !important; }
+.resultados-cotacao, #pres-resultados {
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 8px 10px;
+  border: 1px solid #e5e0d1;
+  border-radius: 12px;
+  background: #fffefa;
+}
+.resultados-cotacao::-webkit-scrollbar, #pres-resultados::-webkit-scrollbar { width: 8px; }
+.resultados-cotacao::-webkit-scrollbar-thumb, #pres-resultados::-webkit-scrollbar-thumb { background:#c9b96f; border-radius:20px; }
+
+/* Cartões mais claros e organizados na área de cotações */
+#cotacoes-pagina > .aviso-modulo {
+  position:relative;
+  padding:18px 18px 16px !important;
+  margin:14px 0 !important;
+  border:1px solid #e4e8ee !important;
+  border-left:5px solid #d6b52e !important;
+  border-radius:15px !important;
+  background:linear-gradient(145deg,#fff 0%,#fffdf6 100%) !important;
+  box-shadow:0 5px 18px rgba(28,43,60,.06);
+}
+#cotacoes-pagina > .aviso-modulo > strong {display:block;font-size:17px;color:#1d4262;margin-bottom:9px;line-height:1.3}
+#cotacoes-pagina > .aviso-modulo p {color:#5f6872;line-height:1.5;margin:7px 0}
+#cotacoes-pagina > .aviso-modulo button {min-height:40px;margin:7px 7px 0 0;border-radius:9px;padding:9px 13px;font-size:11px;font-weight:800}
+@media(max-width:600px){
+ .resultados-cotacao,#pres-resultados{max-height:38vh;padding:6px}
+ #cotacoes-pagina > .aviso-modulo{padding:14px !important;border-radius:12px !important}
+ #cotacoes-pagina > .aviso-modulo button{width:100%;margin:6px 0 0}
+}
