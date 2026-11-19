@@ -1310,6 +1310,8 @@ async function abrirFormularioPresencial(idEdicao = null) {
     const selecionados=new Map();
     const dadosLinhas=new Map();
     let produtoEmEdicaoId=null;
+    let paginaProdutosPresencial=1;
+    const produtosPorPaginaPresencial=5;
     document.getElementById("pres-titulo").value=dadosEdicao?.titulo||"";
     document.getElementById("pres-data").value=dadosEdicao?.data||new Date().toLocaleDateString('en-CA');
     document.getElementById("abrir-produto-rapido-pres").onclick=()=>{const f=document.getElementById("produto-rapido-pres");f.hidden=!f.hidden;};
@@ -1318,13 +1320,18 @@ async function abrirFormularioPresencial(idEdicao = null) {
       const box=document.getElementById("pres-selecionados");
       const todos=[...selecionados.values()];
       if(!todos.length){box.innerHTML='<p class="pres-lista-vazia">Nenhum produto preenchido. Pesquise e adicione o primeiro produto acima.</p>';return;}
+      const totalPaginas=Math.max(1,Math.ceil(todos.length/produtosPorPaginaPresencial));
+      paginaProdutosPresencial=Math.min(Math.max(1,paginaProdutosPresencial),totalPaginas);
+      const inicio=(paginaProdutosPresencial-1)*produtosPorPaginaPresencial;
+      const pagina=todos.slice(inicio,inicio+produtosPorPaginaPresencial);
       box.innerHTML=`<div class="pres-itens-cabecalho"><strong>Produtos preenchidos</strong><span>${todos.length} ${todos.length===1?"item":"itens"}</span></div>`+
-        todos.map((p,indice)=>{
+        pagina.map((p,indice)=>{
+          const numero=inicio+indice+1;
           const d=dadosLinhas.get(p.id)||{};
           const fornecedor=fornecedores.find(f=>f.id===d.vencedorId);
           const preco=(d.precos||{})[d.vencedorId]??"";
           return `<article class="pres-item-resumo">
-            <div class="pres-item-numero">${indice+1}</div>
+            <div class="pres-item-numero">${numero}</div>
             <div class="pres-item-conteudo"><strong>${escaparHTML(p.nome)}</strong>
               <small>${escaparHTML(p.codigoBarras||"Sem código")} · ${escaparHTML(p.unidade||"UN")}</small>
               <div class="pres-item-detalhes"><span>Qtd.: <b>${escaparHTML(d.quantidade??"—")}</b></span><span>Preço: <b>${preco!==""?Number(preco).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}):"Não informado"}</b></span></div>
@@ -1333,9 +1340,10 @@ async function abrirFormularioPresencial(idEdicao = null) {
             </div>
             <div class="pres-item-acoes"><button type="button" data-pres-edit="${escaparHTML(p.id)}">EDITAR</button><button type="button" data-pres-remove="${escaparHTML(p.id)}">REMOVER</button></div>
           </article>`;
-        }).join("");
+        }).join("")+ (todos.length>produtosPorPaginaPresencial?`<div class="pres-paginacao-produtos"><button type="button" data-pres-pagina="anterior" ${paginaProdutosPresencial===1?"disabled":""}>← ANTERIOR</button><span>Página ${paginaProdutosPresencial} de ${totalPaginas}</span><button type="button" data-pres-pagina="proxima" ${paginaProdutosPresencial===totalPaginas?"disabled":""}>PRÓXIMA →</button></div>`:"");
       box.querySelectorAll("[data-pres-edit]").forEach(b=>b.onclick=()=>abrirEditor(selecionados.get(b.dataset.presEdit)));
       box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);dadosLinhas.delete(b.dataset.presRemove);renderTabela();renderBusca();});
+      box.querySelectorAll("[data-pres-pagina]").forEach(b=>b.onclick=()=>{paginaProdutosPresencial+=b.dataset.presPagina==="proxima"?1:-1;renderTabela();});
     };
 
     const abrirEditor=(produto)=>{
@@ -1375,6 +1383,7 @@ async function abrirFormularioPresencial(idEdicao = null) {
         const precosAtualizados={...precos,[fornecedorId]:String(preco)};
         selecionados.set(produto.id,produto);
         dadosLinhas.set(produto.id,{quantidade:String(quantidade),observacao:document.getElementById("pres-editor-obs").value.trim(),vencedorId:fornecedorId,precos:precosAtualizados});
+        paginaProdutosPresencial=Math.max(1,Math.ceil(selecionados.size/produtosPorPaginaPresencial));
         fechar();renderTabela();renderBusca();
       };
       editor.scrollIntoView({behavior:"smooth",block:"nearest"});
@@ -1678,7 +1687,7 @@ async function carregarListaCotacoesAdmin() {
    let lista=cotacoesAdminCache.filter(c=>!data||String(c.data||c.criadoEm?.toDate?.().toLocaleDateString("en-CA")||"").slice(0,10)===data);
    lista=lista.filter(c=>{if(c.tipoLista==="presencial")return c.status==="rascunho"?aba==="abertas":aba==="finalizadas";const dentroPrazo=!c.prazo||new Date(c.prazo)>new Date();const emAberto=c.status==="rascunho"||(c.status==="aberta"&&dentroPrazo);return aba==="abertas"?emAberto:!emAberto;});
    const paginas=Math.max(1,Math.ceil(lista.length/3));paginaCotacoesAtual=Math.min(paginaCotacoesAtual,paginas);const vis=lista.slice((paginaCotacoesAtual-1)*3,paginaCotacoesAtual*3);
-   document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: ${c.status==="rascunho"?"Rascunho em edição":"Finalizada"} · Produtos: ${(c.itens||[]).length}</p>${c.status==="rascunho"?`<button type="button" data-editar-presencial="${escaparHTML(c.id)}">CONTINUAR RASCUNHO</button>`:`<p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p>`}${c.status==="rascunho"?"":`<button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF / IMPRIMIR</button>`}<button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="rascunho"?"Rascunho":c.status==="aberta"?"Aberta":"Finalizada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}${c.status==="rascunho"?`<button type="button" data-editar-rascunho="${escaparHTML(c.id)}">EDITAR RASCUNHO</button><button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`:`<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`}</div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação nesta aba.</div>';
+   document.getElementById("cotacoes-pagina").innerHTML=vis.length?vis.map(c=>c.tipoLista==="presencial"?`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação presencial")}</strong><p>Tipo: <b>Presencial</b> · Data: ${escaparHTML(c.data||"—")}</p><p>Status: ${c.status==="rascunho"?"Rascunho em edição":"Finalizada"} · Produtos: ${(c.itens||[]).length}</p>${c.status==="rascunho"?`<button type="button" data-editar-presencial="${escaparHTML(c.id)}">CONTINUAR RASCUNHO</button>`:`<p>Total geral: <b>${Number(c.valorTotal||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"})}</b></p>`}${c.status==="rascunho"?"":`<button type="button" data-detalhes-presencial="${escaparHTML(c.id)}">VER DETALHES</button><button type="button" data-exportar-presencial="${escaparHTML(c.id)}">PDF GERAL / IMPRIMIR</button><button type="button" data-relatorio-fornecedor="${escaparHTML(c.id)}">RELATÓRIO PDF POR FORNECEDOR</button>`}<button type="button" data-excluir-presencial="${escaparHTML(c.id)}">EXCLUIR</button></div>`:`<div class="aviso-modulo" style="margin:12px 0"><strong>${escaparHTML(c.titulo||"Cotação")}</strong><p>Status: <b>${c.status==="rascunho"?"Rascunho":c.status==="aberta"?"Aberta":"Finalizada"}</b> · Produtos: ${(c.produtos||[]).length}</p><p>Prazo: ${c.prazo?new Date(c.prazo).toLocaleString("pt-BR"):"Não informado"}</p>${c.descricao?`<p>Observações: ${escaparHTML(c.descricao)}</p>`:""}${c.status==="rascunho"?`<button type="button" data-editar-rascunho="${escaparHTML(c.id)}">EDITAR RASCUNHO</button><button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`:`<button type="button" data-exportar-online="${escaparHTML(c.id)}">PDF / IMPRIMIR</button>${c.status==="aberta"?`<button type="button" data-encerrar-cotacao="${escaparHTML(c.id)}">ENCERRAR</button>`:""}<button type="button" data-excluir-online="${escaparHTML(c.id)}">EXCLUIR</button>`}</div>`).join(""):'<div class="aviso-modulo">Nenhuma cotação nesta aba.</div>';
    document.getElementById("cotacoes-pagina-info").textContent=`Página ${paginaCotacoesAtual} de ${paginas} · ${lista.length} cotações`;
    document.getElementById("cotacoes-anterior").disabled=paginaCotacoesAtual===1;document.getElementById("cotacoes-proxima").disabled=paginaCotacoesAtual>=paginas;
    area.querySelectorAll("[data-editar-presencial]").forEach(b=>b.onclick=()=>abrirFormularioPresencial(b.dataset.editarPresencial));
@@ -1688,6 +1697,7 @@ async function carregarListaCotacoesAdmin() {
    area.querySelectorAll("[data-excluir-online]").forEach(b=>b.onclick=()=>excluirCotacaoOnline(b.dataset.excluirOnline));
    area.querySelectorAll("[data-excluir-presencial]").forEach(b=>b.onclick=async()=>{if(!confirm("Excluir permanentemente esta cotação presencial?"))return;try{await deleteDoc(doc(db,"cotacoes_presenciais",b.dataset.excluirPresencial));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir. Confira as regras do Firestore.");}});
    area.querySelectorAll("[data-exportar-online]").forEach(b=>b.onclick=()=>exportarCotacao("online",b.dataset.exportarOnline));area.querySelectorAll("[data-exportar-presencial]").forEach(b=>b.onclick=()=>exportarCotacao("presencial",b.dataset.exportarPresencial));
+   area.querySelectorAll("[data-relatorio-fornecedor]").forEach(b=>b.onclick=()=>abrirSeletorRelatorioFornecedor(b.dataset.relatorioFornecedor));
   };
   area.querySelectorAll("[data-aba-admin]").forEach(b=>b.onclick=()=>{aba=b.dataset.abaAdmin;paginaCotacoesAtual=1;area.querySelectorAll("[data-aba-admin]").forEach(x=>x.classList.toggle("ativa",x===b));render();});
   document.getElementById("migrar-acessos-cotacoes").onclick=migrarAcessosCotacoes;document.getElementById("filtro-data-cotacoes").onchange=()=>{paginaCotacoesAtual=1;render();};document.getElementById("limpar-filtro-cotacoes").onclick=()=>{document.getElementById("filtro-data-cotacoes").value="";paginaCotacoesAtual=1;render();};document.getElementById("cotacoes-anterior").onclick=()=>{paginaCotacoesAtual--;render();};document.getElementById("cotacoes-proxima").onclick=()=>{paginaCotacoesAtual++;render();};render();
@@ -1700,6 +1710,36 @@ async function migrarAcessosCotacoes(){
 
 async function excluirCotacaoOnline(id){if(!confirm("Excluir esta cotação e todas as respostas/vínculos relacionados? Esta ação não pode ser desfeita."))return;try{const [vs,rs]=await Promise.all([getDocs(query(collection(db,"cotacao_fornecedores"),where("cotacaoId","==",id))),getDocs(query(collection(db,"respostas"),where("cotacaoId","==",id)))]);const docs=[...vs.docs,...rs.docs];for(let i=0;i<docs.length;i+=450){const batch=writeBatch(db);docs.slice(i,i+450).forEach(d=>batch.delete(d.ref));await batch.commit();}await deleteDoc(doc(db,"cotacoes",id));await carregarListaCotacoesAdmin();}catch(e){console.error(e);alert("Não foi possível excluir a cotação. Confira as regras do Firestore.");}}
 
+
+async function abrirSeletorRelatorioFornecedor(id){
+  try{
+    const snap=await getDoc(doc(db,"cotacoes_presenciais",id));
+    if(!snap.exists())throw new Error("Cotação presencial não encontrada.");
+    const c=snap.data();
+    const fornecedores=(c.fornecedores||[]).filter(f=>(c.itens||[]).some(i=>i.vencedorId===f.fornecedorId));
+    if(!fornecedores.length){alert("Esta cotação ainda não possui produtos comprados por fornecedores.");return;}
+    const modal=document.createElement("div");
+    modal.style.cssText="position:fixed;inset:0;z-index:99999;background:#0009;display:flex;align-items:center;justify-content:center;padding:16px";
+    modal.innerHTML=`<section role="dialog" aria-modal="true" aria-label="Relatório de compra por fornecedor" style="width:min(100%,480px);background:var(--card,#fff);color:var(--text,#222);padding:20px;border-radius:14px;box-shadow:0 16px 48px #0003"><h2 style="margin:0 0 8px">Relatório por fornecedor</h2><p style="margin:0 0 14px">${escaparHTML(c.titulo||"Cotação presencial")} · ${escaparHTML(c.data||"—")}</p><label for="pres-relatorio-fornecedor" style="display:block;font-weight:700;margin-bottom:7px">Selecione a empresa</label><select id="pres-relatorio-fornecedor" style="width:100%;min-height:44px;padding:9px;border:1px solid #ccd2dc;border-radius:9px">${fornecedores.map(f=>`<option value="${escaparHTML(f.fornecedorId)}">${escaparHTML(f.empresa||f.titular||"Empresa")}</option>`).join("")}</select><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px"><button type="button" id="pres-gerar-relatorio-fornecedor" style="flex:1;min-height:44px">GERAR PDF</button><button type="button" id="pres-cancelar-relatorio-fornecedor" style="min-height:44px">CANCELAR</button></div></section>`;
+    document.body.appendChild(modal);
+    const fechar=()=>modal.remove();
+    modal.querySelector("#pres-cancelar-relatorio-fornecedor").onclick=fechar;
+    modal.addEventListener("click",e=>{if(e.target===modal)fechar();});
+    modal.querySelector("#pres-gerar-relatorio-fornecedor").onclick=()=>{
+      const fornecedorId=modal.querySelector("#pres-relatorio-fornecedor").value;
+      const fornecedor=fornecedores.find(f=>f.fornecedorId===fornecedorId);
+      if(!fornecedor)return;
+      const itens=(c.itens||[]).filter(i=>i.vencedorId===fornecedorId);
+      const total=itens.reduce((s,i)=>s+Number(i.total??(Number(i.quantidade||0)*Number(i.precoVencedor||0))),0);
+      const moeda=v=>Number(v||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+      const linhas=itens.map((i,n)=>`<tr><td>${n+1}</td><td>${escaparHTML(i.nome||"Produto")}</td><td>${Number(i.quantidade||0).toLocaleString("pt-BR")} ${escaparHTML(i.unidade||"UN")}</td><td>${moeda(i.precoVencedor)}</td><td>${moeda(i.total??(Number(i.quantidade||0)*Number(i.precoVencedor||0)))}</td></tr>`).join("");
+      const html=`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Relatório de compra - ${escaparHTML(fornecedor.empresa||fornecedor.titular||"Fornecedor")}</title><style>body{font:14px Arial;padding:28px;color:#222}h1{margin-bottom:4px}h2{margin:6px 0}.meta{margin:16px 0;line-height:1.7;color:#555}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{border:1px solid #bbb;padding:9px;text-align:left}th{background:#f2c928}tbody tr:nth-child(even){background:#fafafa}.total{margin-top:22px;font-size:19px;font-weight:bold;text-align:right}@media print{button{display:none}body{padding:0}thead{display:table-header-group}tr{break-inside:avoid;page-break-inside:avoid}}</style><h1>COMPRAS SANTA RITA</h1><h2>Relatório de compra por fornecedor</h2><div class="meta"><b>Cotação:</b> ${escaparHTML(c.titulo||"Cotação presencial")}<br><b>Data:</b> ${escaparHTML(c.data||"—")}<br><b>Fornecedor:</b> ${escaparHTML(fornecedor.empresa||fornecedor.titular||"Empresa")}</div><table><thead><tr><th>Nº</th><th>Produto</th><th>Quantidade</th><th>Preço unitário</th><th>Total</th></tr></thead><tbody>${linhas||'<tr><td colspan="5">Nenhum produto registrado para este fornecedor.</td></tr>'}</tbody></table><div class="total">Total da compra: ${moeda(total)}</div><p style="margin-top:30px;font-size:11px">Documento gerado pelo sistema Compras Santa Rita.</p><button onclick="window.print()">Salvar como PDF / Imprimir</button></html>`;
+      const w=window.open("","_blank");
+      if(!w){alert("Permita pop-ups para gerar o relatório PDF.");return;}
+      w.document.write(html);w.document.close();fechar();
+    };
+  }catch(e){console.error(e);alert(e.message||"Não foi possível gerar o relatório por fornecedor.");}
+}
 
 async function exportarCotacao(tipo,id){
   try {
