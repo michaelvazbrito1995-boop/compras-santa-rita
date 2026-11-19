@@ -1295,3 +1295,22 @@ td,th{padding:11px;border-bottom:1px solid var(--sr-line)}
 .pres-paginacao-produtos span{font-size:12px;font-weight:750;color:#687180}
 .pres-paginacao-produtos button{min-height:38px;padding:8px 12px;border:1px solid #d9dee7;border-radius:8px;background:#f8fafc;color:#344054;font-size:11px;font-weight:800}
 .pres-paginacao-produtos button:disabled{opacity:.45;cursor:not-allowed}
+
+/* Histórico de compras por fornecedor */
+.historico-filtros{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:10px;align-items:end;margin:16px 0;padding:14px;background:#f7f8fa;border:1px solid #e6e9ed;border-radius:12px}
+.historico-filtros label{display:grid;gap:6px;font-size:12px;font-weight:700;color:#4b5563}
+.historico-filtros input,.historico-filtros select{width:100%;min-height:42px;padding:9px;border:1px solid #ccd2dc;border-radius:8px;background:#fff;color:#222}
+.historico-filtros button{margin:0;min-height:42px;white-space:nowrap}
+.historico-resumo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+.historico-resumo>div{display:grid;gap:5px;padding:14px;border:1px solid #e5e7eb;border-radius:11px;background:#fff}
+.historico-resumo small{color:#687384;font-size:11px}.historico-resumo strong{font-size:19px;color:#23364a;overflow-wrap:anywhere}
+.historico-tabela-wrap{max-width:100%;overflow-x:auto;border:1px solid #e5e7eb;border-radius:11px}
+.historico-tabela{width:100%;min-width:700px;border-collapse:collapse;font-size:12px}
+.historico-tabela th,.historico-tabela td{padding:11px 10px;border-bottom:1px solid #e8ebef;text-align:left;vertical-align:top}
+.historico-tabela thead th{background:#fff4c9;color:#51451b}.historico-tabela tbody tr:nth-child(even){background:#fafbfc}
+.historico-tabela td small{display:block;margin-top:4px;color:#788391;font-size:10px}.historico-nota,.comparacao-legenda{margin:10px 0;color:#687384;font-size:11px}
+.comparacao-tabela td.comparacao-menor-preco{background:#e8f6eb!important;box-shadow:inset 0 0 0 1px #9acda5}
+.comparacao-tabela .selo-menor-preco{color:#20743a!important;font-weight:800!important}
+.comparacao-tabela tfoot th,.comparacao-tabela tfoot td{padding:12px;background:#f1f4f7;border-top:2px solid #d7dde5;font-size:11px}
+.comparacao-tabela tfoot td strong{display:block;color:#26384a}.comparacao-tabela tfoot td small{display:block;margin-top:5px;color:#64748b;font-weight:500}
+@media(max-width:700px){.historico-filtros{grid-template-columns:1fr 1fr}.historico-filtros label:first-child{grid-column:1/-1}.historico-filtros button{grid-column:1/-1;width:100%}.historico-resumo{grid-template-columns:1fr}.historico-resumo>div{padding:11px}.historico-resumo strong{font-size:17px}}
