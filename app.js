@@ -1300,30 +1300,116 @@ async function abrirFormularioPresencial(idEdicao = null) {
         </div>
       </div>
       <div id="pres-resultados" class="resultados-cotacao"></div>
-      <div id="pres-selecionados"></div><div id="pres-paginacao" class="paginacao-cotacoes" style="display:none"><button type="button" id="pres-anterior">ANTERIOR</button><span id="pres-pagina-info"></span><button type="button" id="pres-proxima">PRÓXIMA</button></div>
+      <div id="pres-editor-produto" class="pres-editor-produto" hidden></div>
+      <div id="pres-selecionados" class="pres-itens-compactos"></div>
       <div id="pres-mensagem" role="status"></div>
       <button type="button" id="pres-rascunho">SALVAR RASCUNHO</button>
       <button type="submit" id="pres-salvar">FINALIZAR E SALVAR NO HISTÓRICO</button>
       <button type="button" id="pres-cancelar">CANCELAR</button></form>`;
     ativarLeitoresCodigo(area);
     const selecionados=new Map();
+    const dadosLinhas=new Map();
+    let produtoEmEdicaoId=null;
     document.getElementById("pres-titulo").value=dadosEdicao?.titulo||"";
     document.getElementById("pres-data").value=dadosEdicao?.data||new Date().toLocaleDateString('en-CA');
     document.getElementById("abrir-produto-rapido-pres").onclick=()=>{const f=document.getElementById("produto-rapido-pres");f.hidden=!f.hidden;};
+
+    const renderTabela=()=>{
+      const box=document.getElementById("pres-selecionados");
+      const todos=[...selecionados.values()];
+      if(!todos.length){box.innerHTML='<p class="pres-lista-vazia">Nenhum produto preenchido. Pesquise e adicione o primeiro produto acima.</p>';return;}
+      box.innerHTML=`<div class="pres-itens-cabecalho"><strong>Produtos preenchidos</strong><span>${todos.length} ${todos.length===1?"item":"itens"}</span></div>`+
+        todos.map((p,indice)=>{
+          const d=dadosLinhas.get(p.id)||{};
+          const fornecedor=fornecedores.find(f=>f.id===d.vencedorId);
+          const preco=(d.precos||{})[d.vencedorId]??"";
+          return `<article class="pres-item-resumo">
+            <div class="pres-item-numero">${indice+1}</div>
+            <div class="pres-item-conteudo"><strong>${escaparHTML(p.nome)}</strong>
+              <small>${escaparHTML(p.codigoBarras||"Sem código")} · ${escaparHTML(p.unidade||"UN")}</small>
+              <div class="pres-item-detalhes"><span>Qtd.: <b>${escaparHTML(d.quantidade??"—")}</b></span><span>Preço: <b>${preco!==""?Number(preco).toLocaleString("pt-BR",{style:"currency",currency:"BRL"}):"Não informado"}</b></span></div>
+              <small>Fornecedor: ${escaparHTML(fornecedor?.empresa||fornecedor?.nome||fornecedor?.titular||"Não selecionado")}</small>
+              ${d.observacao?`<small>Obs.: ${escaparHTML(d.observacao)}</small>`:""}
+            </div>
+            <div class="pres-item-acoes"><button type="button" data-pres-edit="${escaparHTML(p.id)}">EDITAR</button><button type="button" data-pres-remove="${escaparHTML(p.id)}">REMOVER</button></div>
+          </article>`;
+        }).join("");
+      box.querySelectorAll("[data-pres-edit]").forEach(b=>b.onclick=()=>abrirEditor(selecionados.get(b.dataset.presEdit)));
+      box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{selecionados.delete(b.dataset.presRemove);dadosLinhas.delete(b.dataset.presRemove);renderTabela();renderBusca();});
+    };
+
+    const abrirEditor=(produto)=>{
+      if(!produto)return;
+      produtoEmEdicaoId=produto.id;
+      const d=dadosLinhas.get(produto.id)||{};
+      const precos=d.precos||{};
+      const fornecedorInicial=d.vencedorId||fornecedores.find(f=>Number(precos[f.id])>0)?.id||"";
+      const precoInicial=precos[fornecedorInicial]??"";
+      const editor=document.getElementById("pres-editor-produto");
+      editor.hidden=false;
+      editor.innerHTML=`<div class="pres-editor-cabecalho"><div><small>${selecionados.has(produto.id)?"EDITAR PRODUTO":"PREENCHER PRODUTO"}</small><strong>${escaparHTML(produto.nome)}</strong><span>${escaparHTML(produto.codigoBarras||"Sem código")} · ${escaparHTML(produto.unidade||"UN")}</span></div><button type="button" id="pres-fechar-editor" aria-label="Fechar">✕</button></div>
+        <div class="pres-editor-campos">
+          <label>Quantidade<input id="pres-editor-qtd" type="number" min="0.001" step="0.001" required value="${escaparHTML(d.quantidade??"1")}"></label>
+          <label>Fornecedor<select id="pres-editor-fornecedor" required><option value="">Selecione o fornecedor</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}" ${fornecedorInicial===f.id?"selected":""}>${escaparHTML(f.empresa||f.nome||"Empresa")} — ${escaparHTML(f.titular)}</option>`).join("")}</select></label>
+          <label>Preço unitário (R$)<input id="pres-editor-preco" type="number" min="0.01" step="0.01" required placeholder="0,00" value="${escaparHTML(precoInicial)}"></label>
+          <label class="pres-editor-observacao">Observação (opcional)<textarea id="pres-editor-obs" rows="2" maxlength="500" placeholder="Bonificação, prazo, condição...">${escaparHTML(d.observacao||"")}</textarea></label>
+        </div>
+        <div class="pres-editor-acoes"><button type="button" id="pres-confirmar-produto">${selecionados.has(produto.id)?"SALVAR ALTERAÇÕES":"CONFIRMAR E ADICIONAR À COTAÇÃO"}</button><button type="button" id="pres-cancelar-editor">CANCELAR</button></div>
+        <p id="pres-editor-erro" role="alert"></p>`;
+      const fechar=()=>{editor.hidden=true;editor.innerHTML="";produtoEmEdicaoId=null;};
+      document.getElementById("pres-fechar-editor").onclick=fechar;
+      document.getElementById("pres-cancelar-editor").onclick=fechar;
+      document.getElementById("pres-editor-fornecedor").onchange=()=>{
+        const id=document.getElementById("pres-editor-fornecedor").value;
+        const campo=document.getElementById("pres-editor-preco");
+        campo.value=id?(precos[id]??""):"";
+      };
+      document.getElementById("pres-confirmar-produto").onclick=()=>{
+        const quantidade=Number(document.getElementById("pres-editor-qtd").value);
+        const fornecedorId=document.getElementById("pres-editor-fornecedor").value;
+        const preco=Number(document.getElementById("pres-editor-preco").value);
+        const erro=document.getElementById("pres-editor-erro");
+        if(!(quantidade>0)||!Number.isFinite(quantidade)){erro.textContent="Informe uma quantidade válida.";return;}
+        if(!fornecedorId){erro.textContent="Selecione o fornecedor deste produto.";return;}
+        if(!(preco>0)||!Number.isFinite(preco)){erro.textContent="Informe um preço unitário válido.";return;}
+        const precosAtualizados={...precos,[fornecedorId]:String(preco)};
+        selecionados.set(produto.id,produto);
+        dadosLinhas.set(produto.id,{quantidade:String(quantidade),observacao:document.getElementById("pres-editor-obs").value.trim(),vencedorId:fornecedorId,precos:precosAtualizados});
+        fechar();renderTabela();renderBusca();
+      };
+      editor.scrollIntoView({behavior:"smooth",block:"nearest"});
+    };
+
+    const renderBusca=()=>{
+      const campo=document.getElementById("pres-busca"),codigo=String(campo.value||"").trim();
+      const exato=produtos.find(p=>String(p.codigoBarras||"").trim()===codigo&&codigo.length>=6);
+      if(exato&&!selecionados.has(exato.id)&&produtoEmEdicaoId!==exato.id){campo.value="";abrirEditor(exato);}
+      else if(/^\d{6,}$/.test(codigo)&&!exato){const painel=document.getElementById("produto-rapido-pres"),codigoRapido=document.getElementById("produto-rapido-codigo-pres");if(painel&&codigoRapido){painel.hidden=false;codigoRapido.value=codigo;}}
+      const q=normalizarTexto(campo.value);
+      const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);
+      document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"PREENCHIDO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";
+      area.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr&&!selecionados.has(pr.id))abrirEditor(pr);});
+    };
+
     document.getElementById("salvar-produto-rapido-pres").onclick=async()=>{
-      const b=document.getElementById("salvar-produto-rapido-pres"), msg=document.getElementById("mensagem-produto-rapido-pres");
-      b.disabled=true; b.textContent="SALVANDO...";
-      try { const pr=await criarProdutoRapido(document.getElementById("produto-rapido-nome-pres").value,document.getElementById("produto-rapido-unidade-pres").value,document.getElementById("produto-rapido-codigo-pres").value); produtos.push(pr); selecionados.set(pr.id,pr); document.getElementById("pres-busca").value=""; document.getElementById("produto-rapido-nome-pres").value=""; document.getElementById("produto-rapido-codigo-pres").value=""; msg.textContent="Produto cadastrado e adicionado à cotação!"; renderTabela(); renderBusca(); }
-      catch(e){msg.textContent=e.message||"Não foi possível cadastrar o produto.";msg.style.color="#c62828";}
+      const b=document.getElementById("salvar-produto-rapido-pres"),msg=document.getElementById("mensagem-produto-rapido-pres");
+      b.disabled=true;b.textContent="SALVANDO...";
+      try{
+        const pr=await criarProdutoRapido(document.getElementById("produto-rapido-nome-pres").value,document.getElementById("produto-rapido-unidade-pres").value,document.getElementById("produto-rapido-codigo-pres").value);
+        produtos.push(pr);document.getElementById("pres-busca").value="";document.getElementById("produto-rapido-nome-pres").value="";document.getElementById("produto-rapido-codigo-pres").value="";document.getElementById("produto-rapido-pres").hidden=true;msg.textContent="Produto cadastrado. Preencha os dados da cotação.";abrirEditor(pr);renderBusca();
+      }catch(e){msg.textContent=e.message||"Não foi possível cadastrar o produto.";msg.style.color="#c62828";}
       finally{b.disabled=false;b.textContent="SALVAR E ADICIONAR";}
     };
-    const renderBusca=()=>{const campo=document.getElementById("pres-busca"), codigo=String(campo.value||"").trim();const exato=produtos.find(p=>String(p.codigoBarras||"").trim()===codigo&&codigo.length>=6);if(exato&&!selecionados.has(exato.id)){selecionados.set(exato.id,exato);campo.value="";renderTabela();}else if(/^\d{6,}$/.test(codigo)&&!exato){const painel=document.getElementById("produto-rapido-pres"),codigoRapido=document.getElementById("produto-rapido-codigo-pres");if(painel&&codigoRapido){painel.hidden=false;codigoRapido.value=codigo;}}const q=normalizarTexto(campo.value);const achados=produtos.filter(p=>!q||normalizarTexto(p.nome+" "+(p.codigoBarras||"")).includes(q)).slice(0,25);document.getElementById("pres-resultados").innerHTML=achados.map(p=>`<div class="resultado-produto-cotacao"><span><b>${escaparHTML(p.nome)}</b> <small>${escaparHTML(p.codigoBarras||"")}</small></span><button type="button" data-pres-add="${escaparHTML(p.id)}" ${selecionados.has(p.id)?"disabled":""}>${selecionados.has(p.id)?"ADICIONADO":"+ ADICIONAR"}</button></div>`).join("")||"Nenhum produto encontrado.";area.querySelectorAll("[data-pres-add]").forEach(b=>b.onclick=()=>{const pr=produtos.find(x=>x.id===b.dataset.presAdd);if(pr)selecionados.set(pr.id,pr);renderTabela();renderBusca();});};
-    const dadosLinhas=new Map(); let paginaPresencial=0; const itensPorPaginaPresencial=5;
-    const capturarLinhas=()=>{area.querySelectorAll("[data-pres-row]").forEach(row=>{const id=row.dataset.presRow;dadosLinhas.set(id,{quantidade:row.querySelector(".pres-qtd")?.value||"1",observacao:row.querySelector(".pres-observacao")?.value||"",vencedorId:row.querySelector(".pres-vencedor")?.value||"",precos:Object.fromEntries([...row.querySelectorAll(".pres-preco")].map(x=>[x.dataset.forn,x.value]))});});};
-    const renderTabela=()=>{capturarLinhas();const box=document.getElementById("pres-selecionados"),todos=[...selecionados.values()];if(!todos.length){box.innerHTML="<p>Nenhum produto adicionado.</p>";document.getElementById("pres-paginacao").style.display="none";return;}const totalPaginas=Math.max(1,Math.ceil(todos.length/itensPorPaginaPresencial));paginaPresencial=Math.min(paginaPresencial,totalPaginas-1);const inicio=paginaPresencial*itensPorPaginaPresencial,visiveis=todos.slice(inicio,inicio+itensPorPaginaPresencial);box.innerHTML=`<div style="overflow-x:auto"><table class="pres-matriz" style="min-width:${Math.max(650,360+fornecedores.length*155)}px;width:100%;border-collapse:collapse"><thead><tr><th>Nº</th><th>Produto / código de barras</th><th>Qtd.</th>${fornecedores.map(f=>`<th>${escaparHTML(f.titular)}<br><small>(${escaparHTML(f.empresa||"Empresa")})</small><br>Preço (R$)</th>`).join("")}<th>Vencedor</th><th></th></tr></thead><tbody>${visiveis.map((p,indice)=>{const d=dadosLinhas.get(p.id)||{};return `<tr data-pres-row="${escaparHTML(p.id)}"><td data-label="Nº"><strong>${inicio+indice+1}</strong></td><td data-label="Produto / código">${escaparHTML(p.nome)}<br><small>Cód.: ${escaparHTML(p.codigoBarras||"Não informado")} · ${escaparHTML(p.unidade||"UN")}</small><br><textarea class="pres-observacao" rows="2" maxlength="500" placeholder="Observação: bonificação, prazo, condição...">${escaparHTML(d.observacao||"")}</textarea></td><td data-label="Quantidade"><input type="number" min="0.001" step="0.001" class="pres-qtd" value="${escaparHTML(d.quantidade||"1")}" style="min-width:75px"></td>${fornecedores.map(f=>`<td data-label="${escaparHTML(f.titular)} (${escaparHTML(f.empresa||"Empresa")}) · Preço (R$)"><input type="number" min="0.01" step="0.01" class="pres-preco" data-forn="${escaparHTML(f.id)}" value="${escaparHTML(d.precos?.[f.id]||"")}" placeholder="—" style="min-width:100px"></td>`).join("")}<td data-label="Vencedor"><select class="pres-vencedor"><option value="">Selecione</option>${fornecedores.map(f=>`<option value="${escaparHTML(f.id)}" ${d.vencedorId===f.id?"selected":""}>${escaparHTML(f.empresa||f.nome||f.titular||"Empresa")}</option>`).join("")}</select></td><td data-label="Ação"><button type="button" data-pres-remove="${escaparHTML(p.id)}">Remover</button></td></tr>`;}).join("")}</tbody></table></div><p>Preencha os preços oferecidos e escolha o vencedor de cada produto. O preço vencedor será usado no total.</p>`;const pag=document.getElementById("pres-paginacao");pag.style.display=todos.length>itensPorPaginaPresencial?"flex":"none";document.getElementById("pres-pagina-info").textContent=`Página ${paginaPresencial+1} de ${totalPaginas} · ${todos.length} produtos`;document.getElementById("pres-anterior").disabled=paginaPresencial===0;document.getElementById("pres-proxima").disabled=paginaPresencial>=totalPaginas-1;box.querySelectorAll("[data-pres-remove]").forEach(b=>b.onclick=()=>{capturarLinhas();selecionados.delete(b.dataset.presRemove);dadosLinhas.delete(b.dataset.presRemove);paginaPresencial=Math.min(paginaPresencial,Math.max(0,Math.ceil(selecionados.size/itensPorPaginaPresencial)-1));renderTabela();renderBusca();});};
-    document.getElementById("pres-anterior").onclick=()=>{capturarLinhas();paginaPresencial--;renderTabela();};document.getElementById("pres-proxima").onclick=()=>{capturarLinhas();paginaPresencial++;renderTabela();};
-    const restaurarLinhas=()=>{for(const item of (dadosEdicao?.itens||[])){const pr=produtos.find(p=>p.id===item.produtoId)||{id:item.produtoId,nome:item.nome,unidade:item.unidade||"UN"};selecionados.set(pr.id,pr);dadosLinhas.set(pr.id,{quantidade:item.quantidade??1,observacao:item.observacao||"",vencedorId:item.vencedorId||"",precos:Object.fromEntries((item.precos||[]).map(x=>[x.fornecedorId,x.preco==null?"":String(x.preco)]))});}renderTabela();};
-    const montarDocumento=(finalizar)=>{capturarLinhas();const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;if(!titulo||!data)throw new Error("Informe o título e a data da reunião.");const itens=[];let erro="";for(const p of selecionados.values()){const d=dadosLinhas.get(p.id)||{};const quantidade=Number(d.quantidade??1);const vencedorId=d.vencedorId||"";const precos=fornecedores.map(f=>{const valor=d.precos?.[f.id]??"";return{fornecedorId:f.id,preco:valor===""?null:Number(valor)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(finalizar&&(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0))){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}const item={produtoId:p.id,nome:p.nome,codigoBarras:p.codigoBarras||"",numero:itens.length+1,unidade:p.unidade||"UN",quantidade:quantidade>0?quantidade:null,observacao:String(d.observacao||"").trim(),precos,vencedorId:vencedorId||"",precoVencedor:vencedor?.preco??null,total:vencedor?.preco>0?quantidade*vencedor.preco:null};itens.push(item);}if(erro)throw new Error(erro);if(finalizar&&!itens.length)throw new Error("Adicione pelo menos um produto para finalizar.");const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?Number(i.total||0):0),0);const valorTotal=itens.reduce((s,i)=>s+Number(i.total||0),0);return{titulo,data,reuniaoTipo:"presencial",status:finalizar?"finalizada":"rascunho",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),responsaveisUids:[...new Set(fornecedores.map(f=>f.responsavelUid).filter(Boolean))],itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",atualizadoEm:serverTimestamp(),...(finalizar?{finalizadoEm:serverTimestamp()}:{})};};
+
+    const restaurarLinhas=()=>{
+      for(const item of (dadosEdicao?.itens||[])){
+        const pr=produtos.find(p=>p.id===item.produtoId)||{id:item.produtoId,nome:item.nome,codigoBarras:item.codigoBarras||"",unidade:item.unidade||"UN"};
+        selecionados.set(pr.id,pr);
+        dadosLinhas.set(pr.id,{quantidade:item.quantidade??1,observacao:item.observacao||"",vencedorId:item.vencedorId||"",precos:Object.fromEntries((item.precos||[]).map(x=>[x.fornecedorId,x.preco==null?"":String(x.preco)]))});
+      }
+      renderTabela();
+    };
+    const montarDocumento=(finalizar)=>{const titulo=document.getElementById("pres-titulo").value.trim(),data=document.getElementById("pres-data").value;if(!titulo||!data)throw new Error("Informe o título e a data da reunião.");const itens=[];let erro="";for(const p of selecionados.values()){const d=dadosLinhas.get(p.id)||{};const quantidade=Number(d.quantidade??1);const vencedorId=d.vencedorId||"";const precos=fornecedores.map(f=>{const valor=d.precos?.[f.id]??"";return{fornecedorId:f.id,preco:valor===""?null:Number(valor)};});const vencedor=precos.find(x=>x.fornecedorId===vencedorId);if(finalizar&&(!(quantidade>0)||!vencedorId||!vencedor||!(vencedor.preco>0))){erro=`Confira quantidade, vencedor e preço vencedor do produto ${p.nome}.`;break;}if(precos.some(x=>x.preco!==null&&(!(x.preco>0)||!Number.isFinite(x.preco)))){erro=`Há preço inválido no produto ${p.nome}.`;break;}const item={produtoId:p.id,nome:p.nome,codigoBarras:p.codigoBarras||"",numero:itens.length+1,unidade:p.unidade||"UN",quantidade:quantidade>0?quantidade:null,observacao:String(d.observacao||"").trim(),precos,vencedorId:vencedorId||"",precoVencedor:vencedor?.preco??null,total:vencedor?.preco>0?quantidade*vencedor.preco:null};itens.push(item);}if(erro)throw new Error(erro);if(finalizar&&!itens.length)throw new Error("Adicione pelo menos um produto para finalizar.");const totais={};for(const f of fornecedores)totais[f.id]=itens.reduce((s,i)=>s+(i.vencedorId===f.id?Number(i.total||0):0),0);const valorTotal=itens.reduce((s,i)=>s+Number(i.total||0),0);return{titulo,data,reuniaoTipo:"presencial",status:finalizar?"finalizada":"rascunho",fornecedores:fornecedores.map(f=>({fornecedorId:f.id,empresa:f.empresa||"",titular:f.titular,responsavelUid:f.responsavelUid||""})),responsaveisUids:[...new Set(fornecedores.map(f=>f.responsavelUid).filter(Boolean))],itens,totais,valorTotal,criadoPor:auth.currentUser?.uid||"",atualizadoEm:serverTimestamp(),...(finalizar?{finalizadoEm:serverTimestamp()}:{})};};
     const salvar=async(finalizar)=>{const btn=document.getElementById(finalizar?"pres-salvar":"pres-rascunho"),msg=document.getElementById("pres-mensagem");try{const dados=montarDocumento(finalizar);btn.disabled=true;btn.textContent="SALVANDO...";if(cotacaoPresencialEditandoId){await updateDoc(doc(db,"cotacoes_presenciais",cotacaoPresencialEditandoId),dados);}else{const ref=await addDoc(collection(db,"cotacoes_presenciais"),{...dados,criadoEm:serverTimestamp()});cotacaoPresencialEditandoId=ref.id;}msg.textContent=finalizar?"Cotação presencial finalizada e salva no histórico!":"Rascunho salvo! Você poderá continuar editando depois.";await carregarListaCotacoesAdmin();if(finalizar){area.style.display="none";area.innerHTML="";cotacaoPresencialEditandoId=null;}else{btn.textContent="SALVAR RASCUNHO";btn.disabled=false;}}catch(e){console.error(e);msg.textContent=e.message||"Não foi possível salvar. Verifique as regras do Firebase.";btn.disabled=false;btn.textContent=finalizar?"FINALIZAR E SALVAR NO HISTÓRICO":"SALVAR RASCUNHO";}};
     document.getElementById("pres-busca").addEventListener("input",renderBusca);
     document.getElementById("pres-rascunho").onclick=()=>salvar(false);
